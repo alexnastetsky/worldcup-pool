@@ -1,25 +1,51 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, Input, Skeleton } from '@databricks/appkit-ui/react';
 import type { Fixtures, Match, Me, ParticipantStatus, Pick, Team } from '../lib/pool';
-import { GROUP_LETTERS, STAGE_NAMES, fetchJson, formatDate, sendJson } from '../lib/pool';
-import { bracketWarnings } from '../lib/scoring';
+import { GROUP_LETTERS, fetchJson, formatDate, sendJson } from '../lib/pool';
+import type { GroupStandingRow } from '../lib/bracket';
+import {
+  bracketProgress,
+  buildBracket,
+  computeGroupStandings,
+  computeQualifiers,
+  stagesFromBracket,
+  winnersFromStages,
+} from '../lib/bracket';
+import { BracketCard } from './BracketCard';
 
 interface MinePayload {
   matchPicks: { match_id: number; pick: Pick }[];
   bracketPicks: { team_id: number; predicted_stage: number }[];
 }
 
-type SaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error' | 'need-name';
+type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 export function PicksPage({ me }: { me: Me }) {
   const [fixtures, setFixtures] = useState<Fixtures | null>(null);
   const [picks, setPicks] = useState<Record<number, Pick>>({});
-  const [stages, setStages] = useState<Record<number, number>>({});
+  const [bracketWinners, setBracketWinners] = useState<Record<number, number>>({});
   const [displayName, setDisplayName] = useState(me.displayName ?? me.email.split('@')[0]);
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [participants, setParticipants] = useState<ParticipantStatus[]>([]);
+
+  // Predicted standings → qualifiers → bracket nodes → per-team stages.
+  // Stages are fully derived; the save payload/scoring is unchanged.
+  const standings = useMemo(() => (fixtures ? computeGroupStandings(picks, fixtures) : {}), [picks, fixtures]);
+  const qualifiers = useMemo(() => computeQualifiers(standings), [standings]);
+  const nodes = useMemo(
+    () => (qualifiers ? buildBracket(qualifiers, bracketWinners) : null),
+    [qualifiers, bracketWinners]
+  );
+  const stages = useMemo(() => {
+    if (!fixtures || !qualifiers || !nodes) return {};
+    return stagesFromBracket(
+      qualifiers,
+      nodes,
+      fixtures.teams.map((t) => t.id)
+    );
+  }, [fixtures, qualifiers, nodes]);
 
   // Latest values for the (debounced, chained) save to read at execution time.
   const picksRef = useRef(picks);
@@ -45,9 +71,13 @@ export function PicksPage({ me }: { me: Me }) {
   useEffect(() => {
     Promise.all([fetchJson<Fixtures>('/api/fixtures'), fetchJson<MinePayload>('/api/predictions/mine')])
       .then(([fx, mine]) => {
+        const loadedPicks = Object.fromEntries(mine.matchPicks.map((p) => [p.match_id, p.pick]));
+        const savedStages = Object.fromEntries(mine.bracketPicks.map((p) => [p.team_id, p.predicted_stage]));
         setFixtures(fx);
-        setPicks(Object.fromEntries(mine.matchPicks.map((p) => [p.match_id, p.pick])));
-        setStages(Object.fromEntries(mine.bracketPicks.map((p) => [p.team_id, p.predicted_stage])));
+        setPicks(loadedPicks);
+        // Rebuild the bracket choices from the saved per-team stages.
+        const q = computeQualifiers(computeGroupStandings(loadedPicks, fx));
+        if (q) setBracketWinners(winnersFromStages(q, savedStages));
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load'));
     loadParticipants();
@@ -62,10 +92,9 @@ export function PicksPage({ me }: { me: Me }) {
       return;
     }
     if (!nameRef.current.trim()) {
-      setSaveState('need-name');
+      // SaveStatus shows "enter a display name" derived from displayName.
       return;
     }
-    setSaveState('pending');
     const timer = setTimeout(() => {
       const seq = ++saveSeqRef.current;
       setSaveState('saving');
@@ -98,11 +127,9 @@ export function PicksPage({ me }: { me: Me }) {
     return map;
   }, [fixtures]);
 
-  const warnings = useMemo(() => (fixtures ? bracketWarnings(stages, fixtures.teams) : []), [stages, fixtures]);
-
   if (!fixtures) {
     return (
-      <div className="max-w-3xl mx-auto space-y-3">
+      <div className="max-w-4xl mx-auto space-y-3">
         {error ? (
           <p className="text-destructive">{error}</p>
         ) : (
@@ -113,117 +140,136 @@ export function PicksPage({ me }: { me: Me }) {
   }
 
   const matchCount = Object.keys(picks).length;
-  const stageCount = Object.keys(stages).length;
+  const progress = nodes ? bracketProgress(nodes) : { decided: 0, total: 31 };
   const locked = me.locked;
 
   return (
-    <div className="max-w-3xl mx-auto space-y-4 pb-8">
-      <Card>
-        <CardHeader>
-          <CardTitle>My Predictions</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {locked ? (
-            <p className="text-sm text-muted-foreground">
-              Submissions are locked — your picks are final and visible to everyone.
-            </p>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Pick a result for all 72 group matches (correct win = 1 pt, correct draw = 2 pts) and how far each of the
-              48 teams goes (cumulative: R32 1, R16 2, QF 3, SF 5, Final 8, Champion 12). Changes save automatically
-              until the pool is locked.
-            </p>
-          )}
-          <div className="flex items-center gap-3">
-            <label className="text-sm font-medium shrink-0" htmlFor="display-name">
-              Display name
-            </label>
-            <Input
-              id="display-name"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              disabled={locked}
-              className="max-w-xs"
-            />
-          </div>
-          <p className="text-sm">
-            Progress: <strong>{matchCount}/72</strong> matches, <strong>{stageCount}/48</strong> teams
-            {!locked && <SaveStatus state={saveState} savedAt={savedAt} error={error} />}
-          </p>
-          {!locked && warnings.length > 0 && (
-            <div className="text-sm rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-800 p-3 space-y-1">
-              <p className="font-medium text-amber-900 dark:text-amber-100">Bracket check</p>
-              <ul className="list-disc pl-5 text-amber-900 dark:text-amber-100">
-                {warnings.map((w) => (
-                  <li key={w}>{w}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {!locked && (
+    <div className="space-y-4 pb-8">
+      <div className="max-w-4xl mx-auto space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle>
-              Who&apos;s in ({participants.length} player{participants.length === 1 ? '' : 's'})
-            </CardTitle>
+            <CardTitle>My Predictions</CardTitle>
           </CardHeader>
-          <CardContent>
-            {participants.length === 0 ? (
+          <CardContent className="space-y-3">
+            {locked ? (
               <p className="text-sm text-muted-foreground">
-                No players yet — you&apos;ll appear here as soon as you make your first pick.
+                Submissions are locked — your picks are final and visible to everyone.
               </p>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-sm">
-                {participants.map((p) => {
-                  const complete = p.match_count === 72 && p.bracket_count === 48;
-                  return (
-                    <div
-                      key={p.email}
-                      className={`flex items-center gap-2 ${p.email === me.email ? 'font-semibold' : ''}`}
-                    >
-                      <span className={complete ? 'text-green-600' : 'text-muted-foreground'}>
-                        {complete ? '✓' : '…'}
-                      </span>
-                      <span className="flex-1 truncate">{p.display_name}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {p.match_count}/72 · {p.bracket_count}/48
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+              <p className="text-sm text-muted-foreground">
+                Pick a result for all 72 group matches (correct win = 1 pt, correct draw = 2 pts).{' '}
+                <strong className="text-foreground">How teams reach the Round of 32:</strong> the top 2 of each group
+                qualify, joined by the 8 best third-placed teams across the 12 groups. Your qualifiers are derived from
+                your match picks (win 3 pts, draw 1; ties broken by head-to-head, then draw seeding) and seeded into the
+                knockout bracket below, where you click winners round by round (bracket scoring: R32 1, R16 2, QF 3, SF
+                5, Final 8, Champion 12, cumulative). Changes save automatically until the pool is locked.
+              </p>
             )}
+            <div className="flex items-center gap-3">
+              <label className="text-sm font-medium shrink-0" htmlFor="display-name">
+                Display name
+              </label>
+              <Input
+                id="display-name"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                disabled={locked}
+                className="max-w-xs"
+              />
+            </div>
+            <p className="text-sm">
+              Progress: <strong>{matchCount}/72</strong> matches · bracket{' '}
+              <strong>
+                {progress.decided}/{progress.total}
+              </strong>{' '}
+              decided
+              {!locked && (
+                <SaveStatus state={saveState} needName={!displayName.trim()} savedAt={savedAt} error={error} />
+              )}
+            </p>
           </CardContent>
         </Card>
-      )}
 
-      {GROUP_LETTERS.map((g) => (
-        <GroupCard
-          key={g}
-          group={g}
-          teams={fixtures.teams.filter((t) => t.group_letter === g)}
-          matches={fixtures.matches.filter((m) => m.group_letter === g)}
+        {!locked && (
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                Who&apos;s in ({participants.length} player{participants.length === 1 ? '' : 's'})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {participants.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No players yet — you&apos;ll appear here as soon as you make your first pick.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-sm">
+                  {participants.map((p) => {
+                    const complete = p.match_count === 72 && p.bracket_count === 48;
+                    return (
+                      <div
+                        key={p.email}
+                        className={`flex items-center gap-2 ${p.email === me.email ? 'font-semibold' : ''}`}
+                      >
+                        <span className={complete ? 'text-green-600' : 'text-muted-foreground'}>
+                          {complete ? '✓' : '…'}
+                        </span>
+                        <span className="flex-1 truncate">{p.display_name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {p.match_count}/72 · {p.bracket_count}/48
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {GROUP_LETTERS.map((g) => (
+          <GroupCard
+            key={g}
+            group={g}
+            matches={fixtures.matches.filter((m) => m.group_letter === g)}
+            teamById={teamById}
+            picks={picks}
+            standing={standings[g] ?? null}
+            locked={locked}
+            onPick={(matchId, pick) => setPicks((prev) => ({ ...prev, [matchId]: pick }))}
+          />
+        ))}
+      </div>
+
+      <div className="max-w-[1180px] mx-auto">
+        <BracketCard
+          nodes={nodes}
           teamById={teamById}
-          picks={picks}
-          stages={stages}
           locked={locked}
-          onPick={(matchId, pick) => setPicks((prev) => ({ ...prev, [matchId]: pick }))}
-          onStage={(teamId, stage) => setStages((prev) => ({ ...prev, [teamId]: stage }))}
+          decided={progress.decided}
+          onPickWinner={(matchNo, teamId) => setBracketWinners((prev) => ({ ...prev, [matchNo]: teamId }))}
         />
-      ))}
+      </div>
     </div>
   );
 }
 
-function SaveStatus({ state, savedAt, error }: { state: SaveState; savedAt: Date | null; error: string | null }) {
-  if (state === 'idle') return null;
-  if (state === 'need-name') {
+function SaveStatus({
+  state,
+  needName,
+  savedAt,
+  error,
+}: {
+  state: SaveState;
+  needName: boolean;
+  savedAt: Date | null;
+  error: string | null;
+}) {
+  if (needName) {
     return <span className="ml-2 text-amber-600">— enter a display name to save</span>;
   }
-  if (state === 'pending' || state === 'saving') {
+  if (state === 'idle') return null;
+  if (state === 'saving') {
     return <span className="ml-2 text-muted-foreground">— saving…</span>;
   }
   if (state === 'error') {
@@ -238,22 +284,20 @@ function SaveStatus({ state, savedAt, error }: { state: SaveState; savedAt: Date
 
 function GroupCard(props: {
   group: string;
-  teams: Team[];
   matches: Match[];
   teamById: Map<number, Team>;
   picks: Record<number, Pick>;
-  stages: Record<number, number>;
+  standing: GroupStandingRow[] | null;
   locked: boolean;
   onPick: (matchId: number, pick: Pick) => void;
-  onStage: (teamId: number, stage: number) => void;
 }) {
-  const { group, teams, matches, teamById, picks, stages, locked, onPick, onStage } = props;
+  const { group, matches, teamById, picks, standing, locked, onPick } = props;
   return (
     <Card>
       <CardHeader>
         <CardTitle>Group {group}</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-3">
         <div className="space-y-2">
           {matches.map((m) => {
             const home = teamById.get(m.home_team_id)?.name ?? '?';
@@ -286,32 +330,25 @@ function GroupCard(props: {
             );
           })}
         </div>
-        <div>
-          <p className="text-sm font-medium mb-2">How far does each team go?</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {teams.map((t) => (
-              <div key={t.id} className="flex items-center gap-2">
-                <span className="text-sm flex-1 truncate">{t.name}</span>
-                <select
-                  aria-label={`Furthest stage for ${t.name}`}
-                  className="border rounded-md px-2 py-1 text-sm bg-background"
-                  value={stages[t.id] ?? ''}
-                  disabled={locked}
-                  onChange={(e) => onStage(t.id, parseInt(e.target.value, 10))}
-                >
-                  <option value="" disabled>
-                    Pick…
-                  </option>
-                  {STAGE_NAMES.map((name, i) => (
-                    <option key={name} value={i}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ))}
-          </div>
-        </div>
+        <p className="text-xs text-muted-foreground">
+          {standing ? (
+            <>
+              Predicted finish:{' '}
+              {standing.map((row, i) => (
+                <span key={row.teamId}>
+                  {i > 0 && ' · '}
+                  {i + 1}.{' '}
+                  <span className={i < 2 ? 'font-medium text-foreground' : ''}>
+                    {teamById.get(row.teamId)?.name ?? '?'}
+                  </span>
+                  {i === 2 && ' (best-thirds race)'}
+                </span>
+              ))}
+            </>
+          ) : (
+            'Predicted finish appears once all 6 matches are picked.'
+          )}
+        </p>
       </CardContent>
     </Card>
   );
