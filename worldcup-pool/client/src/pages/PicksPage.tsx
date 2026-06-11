@@ -163,7 +163,7 @@ export function PicksPage({ me }: { me: Me }) {
         </CardContent>
       </Card>
 
-      {!locked && participants.length > 0 && (
+      {!locked && (
         <Card>
           <CardHeader>
             <CardTitle>
@@ -171,25 +171,31 @@ export function PicksPage({ me }: { me: Me }) {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-sm">
-              {participants.map((p) => {
-                const complete = p.match_count === 72 && p.bracket_count === 48;
-                return (
-                  <div
-                    key={p.email}
-                    className={`flex items-center gap-2 ${p.email === me.email ? 'font-semibold' : ''}`}
-                  >
-                    <span className={complete ? 'text-green-600' : 'text-muted-foreground'}>
-                      {complete ? '✓' : '…'}
-                    </span>
-                    <span className="flex-1 truncate">{p.display_name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {p.match_count}/72 · {p.bracket_count}/48
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+            {participants.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No players yet — you&apos;ll appear here as soon as you make your first pick.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-sm">
+                {participants.map((p) => {
+                  const complete = p.match_count === 72 && p.bracket_count === 48;
+                  return (
+                    <div
+                      key={p.email}
+                      className={`flex items-center gap-2 ${p.email === me.email ? 'font-semibold' : ''}`}
+                    >
+                      <span className={complete ? 'text-green-600' : 'text-muted-foreground'}>
+                        {complete ? '✓' : '…'}
+                      </span>
+                      <span className="flex-1 truncate">{p.display_name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {p.match_count}/72 · {p.bracket_count}/48
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
