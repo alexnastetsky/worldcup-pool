@@ -17,13 +17,16 @@ every invited user lands in that group automatically.
 
 ## Running the pool (admin = seashelf@gmail.com)
 
-1. Everyone makes picks on **My Picks** (editable while submissions are open).
+1. Everyone makes picks on **My Picks** — changes save automatically while submissions are
+   open, and the "Who's in" card shows each player's completeness (72 matches + 48 teams).
 2. Optionally dry-run the whole flow, then use **Admin → Danger Zone → Reset pool** to wipe
    test data before the real pool starts.
 3. When all predictions are in (before kickoff!), hit **Admin → Lock submissions**.
    Everyone can then see all picks and the standings.
-4. As the tournament progresses, enter group-match results and bump each team's
-   "furthest stage reached" on the **Admin** page — standings update live.
+4. As the tournament progresses, on the **Admin** page: enter group-match results, bump each
+   team's "furthest stage reached" as it advances, and tick **Out** when a team is eliminated.
+   Out freezes that team's bracket points and powers the **Max** column on Standings (each
+   player's still-reachable ceiling). Click any standings row for a full points breakdown.
 
 ## Scoring
 

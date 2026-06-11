@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, CardContent, CardHeader, CardTitle, Input, Skeleton } from '@databricks/appkit-ui/react';
-import type { Fixtures, Match, Me, Pick, Team } from '../lib/pool';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle, Input, Skeleton } from '@databricks/appkit-ui/react';
+import type { Fixtures, Match, Me, ParticipantStatus, Pick, Team } from '../lib/pool';
 import { GROUP_LETTERS, STAGE_NAMES, fetchJson, formatDate, sendJson } from '../lib/pool';
+import { bracketWarnings } from '../lib/scoring';
 
 interface MinePayload {
   matchPicks: { match_id: number; pick: Pick }[];
   bracketPicks: { team_id: number; predicted_stage: number }[];
 }
+
+type SaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error' | 'need-name';
 
 export function PicksPage({ me }: { me: Me }) {
   const [fixtures, setFixtures] = useState<Fixtures | null>(null);
@@ -14,8 +17,30 @@ export function PicksPage({ me }: { me: Me }) {
   const [stages, setStages] = useState<Record<number, number>>({});
   const [displayName, setDisplayName] = useState(me.displayName ?? me.email.split('@')[0]);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [saveState, setSaveState] = useState<SaveState>('idle');
   const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const [participants, setParticipants] = useState<ParticipantStatus[]>([]);
+
+  // Latest values for the (debounced, chained) save to read at execution time.
+  const picksRef = useRef(picks);
+  const stagesRef = useRef(stages);
+  const nameRef = useRef(displayName);
+  useEffect(() => {
+    picksRef.current = picks;
+    stagesRef.current = stages;
+    nameRef.current = displayName;
+  }, [picks, stages, displayName]);
+
+  const firstRunRef = useRef(true);
+  // Serializes saves so an older snapshot can never overwrite a newer one.
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const saveSeqRef = useRef(0);
+
+  const loadParticipants = () => {
+    fetchJson<ParticipantStatus[]>('/api/participants/status')
+      .then(setParticipants)
+      .catch(() => undefined); // non-critical
+  };
 
   useEffect(() => {
     Promise.all([fetchJson<Fixtures>('/api/fixtures'), fetchJson<MinePayload>('/api/predictions/mine')])
@@ -25,7 +50,47 @@ export function PicksPage({ me }: { me: Me }) {
         setStages(Object.fromEntries(mine.bracketPicks.map((p) => [p.team_id, p.predicted_stage])));
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load'));
+    loadParticipants();
   }, []);
+
+  // Auto-save: debounce user changes, then run saves in order.
+  useEffect(() => {
+    if (!fixtures || me.locked) return;
+    if (firstRunRef.current) {
+      // This run was triggered by the initial data load, not a user edit.
+      firstRunRef.current = false;
+      return;
+    }
+    if (!nameRef.current.trim()) {
+      setSaveState('need-name');
+      return;
+    }
+    setSaveState('pending');
+    const timer = setTimeout(() => {
+      const seq = ++saveSeqRef.current;
+      setSaveState('saving');
+      saveChainRef.current = saveChainRef.current.then(async () => {
+        try {
+          await sendJson('/api/predictions/mine', 'PUT', {
+            displayName: nameRef.current.trim(),
+            matchPicks: Object.fromEntries(Object.entries(picksRef.current).map(([k, v]) => [String(k), v])),
+            bracketPicks: Object.fromEntries(Object.entries(stagesRef.current).map(([k, v]) => [String(k), v])),
+          });
+          if (seq === saveSeqRef.current) {
+            setSaveState('saved');
+            setSavedAt(new Date());
+            loadParticipants();
+          }
+        } catch (err) {
+          if (seq === saveSeqRef.current) {
+            setSaveState('error');
+            setError(err instanceof Error ? err.message : 'Failed to save');
+          }
+        }
+      });
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [picks, stages, displayName, fixtures, me.locked]);
 
   const teamById = useMemo(() => {
     const map = new Map<number, Team>();
@@ -33,22 +98,7 @@ export function PicksPage({ me }: { me: Me }) {
     return map;
   }, [fixtures]);
 
-  const save = async () => {
-    setSaving(true);
-    setError(null);
-    try {
-      await sendJson('/api/predictions/mine', 'PUT', {
-        displayName: displayName.trim(),
-        matchPicks: Object.fromEntries(Object.entries(picks).map(([k, v]) => [String(k), v])),
-        bracketPicks: Object.fromEntries(Object.entries(stages).map(([k, v]) => [String(k), v])),
-      });
-      setSavedAt(new Date());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save');
-    } finally {
-      setSaving(false);
-    }
-  };
+  const warnings = useMemo(() => (fixtures ? bracketWarnings(stages, fixtures.teams) : []), [stages, fixtures]);
 
   if (!fixtures) {
     return (
@@ -67,7 +117,7 @@ export function PicksPage({ me }: { me: Me }) {
   const locked = me.locked;
 
   return (
-    <div className="max-w-3xl mx-auto space-y-4 pb-24">
+    <div className="max-w-3xl mx-auto space-y-4 pb-8">
       <Card>
         <CardHeader>
           <CardTitle>My Predictions</CardTitle>
@@ -80,8 +130,8 @@ export function PicksPage({ me }: { me: Me }) {
           ) : (
             <p className="text-sm text-muted-foreground">
               Pick a result for all 72 group matches (correct win = 1 pt, correct draw = 2 pts) and how far each of the
-              48 teams goes (cumulative: R32 1, R16 2, QF 3, SF 5, Final 8, Champion 12). You can edit until the pool is
-              locked.
+              48 teams goes (cumulative: R32 1, R16 2, QF 3, SF 5, Final 8, Champion 12). Changes save automatically
+              until the pool is locked.
             </p>
           )}
           <div className="flex items-center gap-3">
@@ -98,9 +148,51 @@ export function PicksPage({ me }: { me: Me }) {
           </div>
           <p className="text-sm">
             Progress: <strong>{matchCount}/72</strong> matches, <strong>{stageCount}/48</strong> teams
+            {!locked && <SaveStatus state={saveState} savedAt={savedAt} error={error} />}
           </p>
+          {!locked && warnings.length > 0 && (
+            <div className="text-sm rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-800 p-3 space-y-1">
+              <p className="font-medium text-amber-900 dark:text-amber-100">Bracket check</p>
+              <ul className="list-disc pl-5 text-amber-900 dark:text-amber-100">
+                {warnings.map((w) => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </CardContent>
       </Card>
+
+      {!locked && participants.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Who&apos;s in ({participants.length} player{participants.length === 1 ? '' : 's'})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-sm">
+              {participants.map((p) => {
+                const complete = p.match_count === 72 && p.bracket_count === 48;
+                return (
+                  <div
+                    key={p.email}
+                    className={`flex items-center gap-2 ${p.email === me.email ? 'font-semibold' : ''}`}
+                  >
+                    <span className={complete ? 'text-green-600' : 'text-muted-foreground'}>
+                      {complete ? '✓' : '…'}
+                    </span>
+                    <span className="flex-1 truncate">{p.display_name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {p.match_count}/72 · {p.bracket_count}/48
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {GROUP_LETTERS.map((g) => (
         <GroupCard
@@ -116,21 +208,25 @@ export function PicksPage({ me }: { me: Me }) {
           onStage={(teamId, stage) => setStages((prev) => ({ ...prev, [teamId]: stage }))}
         />
       ))}
-
-      {!locked && (
-        <div className="fixed bottom-0 left-0 right-0 border-t bg-background p-3">
-          <div className="max-w-3xl mx-auto flex items-center gap-3">
-            <Button onClick={() => void save()} disabled={saving || !displayName.trim()}>
-              {saving ? 'Saving…' : 'Save predictions'}
-            </Button>
-            {savedAt && !error && (
-              <span className="text-sm text-muted-foreground">Saved at {savedAt.toLocaleTimeString()}</span>
-            )}
-            {error && <span className="text-sm text-destructive">{error}</span>}
-          </div>
-        </div>
-      )}
     </div>
+  );
+}
+
+function SaveStatus({ state, savedAt, error }: { state: SaveState; savedAt: Date | null; error: string | null }) {
+  if (state === 'idle') return null;
+  if (state === 'need-name') {
+    return <span className="ml-2 text-amber-600">— enter a display name to save</span>;
+  }
+  if (state === 'pending' || state === 'saving') {
+    return <span className="ml-2 text-muted-foreground">— saving…</span>;
+  }
+  if (state === 'error') {
+    return <span className="ml-2 text-destructive">— save failed: {error}</span>;
+  }
+  return (
+    <span className="ml-2 text-muted-foreground">
+      — all changes saved{savedAt ? ` at ${savedAt.toLocaleTimeString()}` : ''}
+    </span>
   );
 }
 

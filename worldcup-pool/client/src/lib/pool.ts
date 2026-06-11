@@ -11,6 +11,8 @@ export interface Team {
   group_letter: string;
   // null = fate not yet decided; 0 = eliminated in group stage
   actual_stage: number | null;
+  // true once the team is out of the tournament (stage is then final)
+  eliminated: boolean;
 }
 
 export interface Match {
@@ -35,6 +37,15 @@ export interface StandingRow {
   group_points: number;
   bracket_points: number;
   total_points: number;
+  max_points: number;
+}
+
+export interface ParticipantStatus {
+  email: string;
+  display_name: string;
+  match_count: number;
+  bracket_count: number;
+  updated_at: string;
 }
 
 export const STAGE_NAMES = [
@@ -50,6 +61,10 @@ export const STAGE_NAMES = [
 export const STAGE_SHORT = ['—', 'R32', 'R16', 'QF', 'SF', 'F', '🏆'] as const;
 
 export const GROUP_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
+
+// Cumulative bracket points by stage reached: R32 1, R16 2, QF 3, SF 5,
+// Final 8, Champion 12 → running totals. Mirrors the server's scoring SQL.
+export const CUM_POINTS = [0, 1, 3, 6, 11, 19, 31] as const;
 
 export async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url);

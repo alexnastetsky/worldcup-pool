@@ -47,9 +47,9 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
     });
   };
 
-  const setTeamStage = (teamId: number, stage: number | null) => {
+  const setTeamStage = (teamId: number, stage: number | null, eliminated: boolean) => {
     run(async () => {
-      await sendJson(`/api/admin/results/team/${teamId}`, 'PUT', { stage });
+      await sendJson(`/api/admin/results/team/${teamId}`, 'PUT', { stage, eliminated });
       loadFixtures();
     });
   };
@@ -139,28 +139,47 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
             <CardTitle>Team Progress (furthest stage reached)</CardTitle>
           </CardHeader>
           <CardContent>
+            <p className="text-xs text-muted-foreground mb-3">
+              Bump a team&apos;s stage as it advances, and mark it <strong>Out</strong> when it&apos;s eliminated — Out
+              freezes its bracket points and feeds the &quot;Max&quot; column on Standings. &quot;Out in groups&quot; is
+              always Out; &quot;Not decided yet&quot; never is.
+            </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {fixtures.teams.map((t) => (
-                <div key={t.id} className="flex items-center gap-2 text-sm">
-                  <span className="text-muted-foreground w-4">{t.group_letter}</span>
-                  <span className="flex-1 truncate">{t.name}</span>
-                  <select
-                    aria-label={`Stage reached by ${t.name}`}
-                    className={`border rounded-md px-2 py-1 text-sm bg-background ${
-                      t.actual_stage === null ? 'text-muted-foreground' : ''
-                    }`}
-                    value={t.actual_stage ?? ''}
-                    onChange={(e) => setTeamStage(t.id, e.target.value === '' ? null : parseInt(e.target.value, 10))}
-                  >
-                    <option value="">Not decided yet</option>
-                    {STAGE_NAMES.map((name, i) => (
-                      <option key={name} value={i}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ))}
+              {fixtures.teams.map((t) => {
+                const forced = t.actual_stage === null || t.actual_stage === 0;
+                return (
+                  <div key={t.id} className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground w-4">{t.group_letter}</span>
+                    <span className="flex-1 truncate">{t.name}</span>
+                    <select
+                      aria-label={`Stage reached by ${t.name}`}
+                      className={`border rounded-md px-2 py-1 text-sm bg-background ${
+                        t.actual_stage === null ? 'text-muted-foreground' : ''
+                      }`}
+                      value={t.actual_stage ?? ''}
+                      onChange={(e) =>
+                        setTeamStage(t.id, e.target.value === '' ? null : parseInt(e.target.value, 10), t.eliminated)
+                      }
+                    >
+                      <option value="">Not decided yet</option>
+                      {STAGE_NAMES.map((name, i) => (
+                        <option key={name} value={i}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                    <label className={`flex items-center gap-1 text-xs ${forced ? 'opacity-50' : 'cursor-pointer'}`}>
+                      <input
+                        type="checkbox"
+                        checked={t.eliminated}
+                        disabled={forced}
+                        onChange={(e) => setTeamStage(t.id, t.actual_stage, e.target.checked)}
+                      />
+                      Out
+                    </label>
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>

@@ -18,11 +18,21 @@ interface AppKitWithLakebase {
 // Champion 12), so the running total per stage is:
 //   cum(1)=1, cum(2)=3, cum(3)=6, cum(4)=11, cum(5)=19, cum(6)=31
 // A team scores cum(LEAST(predicted, actual)) for each participant.
-const CUMULATIVE_STAGE_POINTS_SQL = `
-  CASE LEAST(bp.predicted_stage, COALESCE(t.actual_stage, 0))
+const cumulativePointsSql = (stageExpr: string) => `
+  CASE ${stageExpr}
     WHEN 1 THEN 1 WHEN 2 THEN 3 WHEN 3 THEN 6
     WHEN 4 THEN 11 WHEN 5 THEN 19 WHEN 6 THEN 31
     ELSE 0
+  END`;
+
+const BRACKET_EARNED_SQL = cumulativePointsSql('LEAST(bp.predicted_stage, COALESCE(t.actual_stage, 0))');
+
+// Ceiling: an eliminated team's points are final; the champion can't advance
+// further; everyone else can still reach the predicted stage.
+const BRACKET_MAX_SQL = `
+  CASE WHEN t.eliminated OR t.actual_stage = 6
+    THEN ${BRACKET_EARNED_SQL}
+    ELSE ${cumulativePointsSql('bp.predicted_stage')}
   END`;
 
 const SETUP_SQL = `
@@ -33,7 +43,9 @@ const SETUP_SQL = `
     name TEXT NOT NULL UNIQUE,
     group_letter CHAR(1) NOT NULL,
     -- NULL = fate not yet decided; 0 = eliminated in group stage
-    actual_stage INT CHECK (actual_stage BETWEEN 0 AND 6)
+    actual_stage INT CHECK (actual_stage BETWEEN 0 AND 6),
+    -- TRUE once the team is out of the tournament (stage is then final)
+    eliminated BOOLEAN NOT NULL DEFAULT FALSE
   );
 
   CREATE TABLE IF NOT EXISTS pool.matches (
@@ -84,6 +96,7 @@ const PutMatchResultBody = z.object({
 
 const PutTeamStageBody = z.object({
   stage: z.number().int().min(0).max(6).nullable(),
+  eliminated: z.boolean(),
 });
 
 function getUserEmail(req: Request): string | null {
@@ -125,6 +138,12 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
       await appkit.lakebase.query('UPDATE pool.teams SET actual_stage = NULL');
       console.log('[pool] Migrated teams.actual_stage to nullable (NULL = not yet decided)');
     }
+
+    // Migration: eliminated flag distinguishes a team that is out from one
+    // still alive at the same stage (needed for max-possible-points).
+    await appkit.lakebase.query(
+      'ALTER TABLE pool.teams ADD COLUMN IF NOT EXISTS eliminated BOOLEAN NOT NULL DEFAULT FALSE'
+    );
 
     const { rows } = await appkit.lakebase.query('SELECT COUNT(*)::int AS n FROM pool.teams');
     if ((rows[0] as { n: number }).n === 0) {
@@ -196,7 +215,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
     app.get('/api/fixtures', async (_req, res) => {
       try {
         const teams = await appkit.lakebase.query(
-          'SELECT id, name, group_letter, actual_stage FROM pool.teams ORDER BY group_letter, id'
+          'SELECT id, name, group_letter, actual_stage, eliminated FROM pool.teams ORDER BY group_letter, id'
         );
         const matches = await appkit.lakebase.query(
           `SELECT id, group_letter, home_team_id, away_team_id,
@@ -206,6 +225,23 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
         res.json({ teams: teams.rows, matches: matches.rows });
       } catch (err) {
         handleError(res, 'Failed to load fixtures', err);
+      }
+    });
+
+    // Who's in: names and completeness only — never the picks themselves,
+    // so it is safe to expose before submissions are locked.
+    app.get('/api/participants/status', async (_req, res) => {
+      try {
+        const { rows } = await appkit.lakebase.query(`
+          SELECT p.email, p.display_name, p.updated_at,
+                 (SELECT COUNT(*) FROM pool.match_predictions mp WHERE mp.email = p.email)::int AS match_count,
+                 (SELECT COUNT(*) FROM pool.bracket_predictions bp WHERE bp.email = p.email)::int AS bracket_count
+          FROM pool.participants p
+          ORDER BY p.display_name
+        `);
+        res.json(rows);
+      } catch (err) {
+        handleError(res, 'Failed to load participant status', err);
       }
     });
 
@@ -300,14 +336,20 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
             SELECT mp.email,
                    SUM(CASE WHEN mp.pick = m.actual_result
                             THEN CASE WHEN m.actual_result = 'D' THEN 2 ELSE 1 END
-                            ELSE 0 END) AS pts
+                            ELSE 0 END) AS pts,
+                   SUM(CASE WHEN m.actual_result IS NULL
+                            THEN CASE WHEN mp.pick = 'D' THEN 2 ELSE 1 END
+                            WHEN mp.pick = m.actual_result
+                            THEN CASE WHEN m.actual_result = 'D' THEN 2 ELSE 1 END
+                            ELSE 0 END) AS max_pts
             FROM pool.match_predictions mp
             JOIN pool.matches m ON m.id = mp.match_id
-            WHERE m.actual_result IS NOT NULL
             GROUP BY mp.email
           ),
           bracket_pts AS (
-            SELECT bp.email, SUM(${CUMULATIVE_STAGE_POINTS_SQL}) AS pts
+            SELECT bp.email,
+                   SUM(${BRACKET_EARNED_SQL}) AS pts,
+                   SUM(${BRACKET_MAX_SQL}) AS max_pts
             FROM pool.bracket_predictions bp
             JOIN pool.teams t ON t.id = bp.team_id
             GROUP BY bp.email
@@ -315,7 +357,8 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
           SELECT p.email, p.display_name,
                  COALESCE(g.pts, 0)::int AS group_points,
                  COALESCE(b.pts, 0)::int AS bracket_points,
-                 (COALESCE(g.pts, 0) + COALESCE(b.pts, 0))::int AS total_points
+                 (COALESCE(g.pts, 0) + COALESCE(b.pts, 0))::int AS total_points,
+                 (COALESCE(g.max_pts, 0) + COALESCE(b.max_pts, 0))::int AS max_points
           FROM pool.participants p
           LEFT JOIN group_pts g ON g.email = p.email
           LEFT JOIN bracket_pts b ON b.email = p.email
@@ -375,9 +418,13 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
           res.status(400).json({ error: 'Invalid team stage' });
           return;
         }
+        const { stage } = parsed.data;
+        // Stage 0 (out in groups) is by definition eliminated; an undecided
+        // team cannot be eliminated yet.
+        const eliminated = stage === 0 ? true : stage === null ? false : parsed.data.eliminated;
         const { rows } = await appkit.lakebase.query(
-          'UPDATE pool.teams SET actual_stage = $2 WHERE id = $1 RETURNING id',
-          [id, parsed.data.stage]
+          'UPDATE pool.teams SET actual_stage = $2, eliminated = $3 WHERE id = $1 RETURNING id',
+          [id, stage, eliminated]
         );
         if (rows.length === 0) {
           res.status(404).json({ error: 'Team not found' });
@@ -397,7 +444,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
         await appkit.lakebase.query('DELETE FROM pool.bracket_predictions');
         await appkit.lakebase.query('DELETE FROM pool.participants');
         await appkit.lakebase.query('UPDATE pool.matches SET actual_result = NULL');
-        await appkit.lakebase.query('UPDATE pool.teams SET actual_stage = NULL');
+        await appkit.lakebase.query('UPDATE pool.teams SET actual_stage = NULL, eliminated = FALSE');
         await appkit.lakebase.query('UPDATE pool.app_state SET locked = FALSE, locked_at = NULL WHERE id = 1');
         res.json({ ok: true });
       } catch (err) {
