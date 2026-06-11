@@ -1,0 +1,6 @@
+command: ['npm', 'run', 'start']
+env:
+  - name: LAKEBASE_ENDPOINT
+    valueFrom: postgres
+  - name: ADMIN_EMAIL
+    value: seashelf@gmail.com
