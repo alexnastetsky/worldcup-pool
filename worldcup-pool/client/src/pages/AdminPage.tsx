@@ -126,7 +126,7 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
         </CardHeader>
         <CardContent className="space-y-2">
           <p className="text-sm text-muted-foreground">
-            Match results and team progress auto-fill from ESPN every ~30 minutes as games finish. Your manual edits
+            Match results and team progress auto-fill from ESPN every ~5 minutes as games finish. Your manual edits
             below always win and are never overwritten.
           </p>
           <div className="flex items-center gap-3">

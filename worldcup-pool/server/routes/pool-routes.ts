@@ -3,7 +3,7 @@ import { Application, Request, Response } from 'express';
 import { SEED_TEAMS, SEED_MATCHES } from '../seed-data';
 import { syncResults } from '../results-sync';
 
-const SYNC_INTERVAL_MS = 30 * 60 * 1000;
+const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
 interface AppKitWithLakebase {
   lakebase: {
@@ -189,7 +189,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
   }
 
   // Auto-pull results from ESPN: a full sweep at startup, then a rolling
-  // window every 30 minutes. Errors are swallowed (recorded in sync_state).
+  // window every 5 minutes. Errors are swallowed (recorded in sync_state).
   const runSync = (allDates: boolean) =>
     syncResults(appkit, { allDates })
       .then((s) => console.log(`[pool] results sync: ${JSON.stringify(s)}`))
