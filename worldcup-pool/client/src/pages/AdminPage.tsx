@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Skeleton } from '@databricks/appkit-ui/react';
 import type { Fixtures, Me, Pick, Team } from '../lib/pool';
 import { GROUP_LETTERS, STAGE_NAMES, fetchJson, formatDate, sendJson } from '../lib/pool';
+import { Toc } from '../components/Toc';
 
 export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => void }) {
   const [fixtures, setFixtures] = useState<Fixtures | null>(null);
@@ -65,7 +66,16 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
-      <Card>
+      <Toc
+        items={[
+          { id: 'submissions', label: 'Submissions' },
+          { id: 'results', label: 'Match Results' },
+          ...GROUP_LETTERS.map((g) => ({ id: `results-${g.toLowerCase()}`, label: g })),
+          { id: 'teams', label: 'Team Progress' },
+          { id: 'danger', label: 'Danger Zone' },
+        ]}
+      />
+      <Card id="submissions" className="scroll-mt-14">
         <CardHeader>
           <CardTitle>Submissions</CardTitle>
         </CardHeader>
@@ -85,13 +95,13 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
       {!fixtures && <Skeleton className="h-64 w-full" />}
 
       {fixtures && (
-        <Card>
+        <Card id="results" className="scroll-mt-14">
           <CardHeader>
             <CardTitle>Match Results</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {GROUP_LETTERS.map((g) => (
-              <div key={g}>
+              <div key={g} id={`results-${g.toLowerCase()}`} className="scroll-mt-14">
                 <p className="text-sm font-medium mb-1">Group {g}</p>
                 <div className="space-y-1">
                   {fixtures.matches
@@ -134,7 +144,7 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
       )}
 
       {fixtures && (
-        <Card>
+        <Card id="teams" className="scroll-mt-14">
           <CardHeader>
             <CardTitle>Team Progress (furthest stage reached)</CardTitle>
           </CardHeader>
@@ -185,7 +195,7 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
         </Card>
       )}
 
-      <Card className="border-destructive">
+      <Card id="danger" className="border-destructive scroll-mt-14">
         <CardHeader>
           <CardTitle className="text-destructive">Danger Zone</CardTitle>
         </CardHeader>

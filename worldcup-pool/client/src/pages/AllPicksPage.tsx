@@ -10,6 +10,7 @@ import {
   winnersFromStages,
 } from '../lib/bracket';
 import { BracketCard } from './BracketCard';
+import { Toc } from '../components/Toc';
 
 interface AllPicksPayload {
   participants: { email: string; display_name: string }[];
@@ -21,6 +22,7 @@ export function AllPicksPage({ me }: { me: Me }) {
   const [fixtures, setFixtures] = useState<Fixtures | null>(null);
   const [data, setData] = useState<AllPicksPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!me.locked) return;
@@ -28,9 +30,17 @@ export function AllPicksPage({ me }: { me: Me }) {
       .then(([fx, all]) => {
         setFixtures(fx);
         setData(all);
+        // Default columns: everyone when the pool is small, otherwise just
+        // the viewer (or the first player if the viewer hasn't submitted).
+        const emails = all.participants.map((p) => p.email);
+        if (emails.length <= 4) {
+          setSelected(new Set(emails));
+        } else {
+          setSelected(new Set([emails.includes(me.email) ? me.email : emails[0]]));
+        }
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load picks'));
-  }, [me.locked]);
+  }, [me.locked, me.email]);
 
   const matchPickMap = useMemo(() => {
     const map = new Map<string, Pick>();
@@ -75,6 +85,16 @@ export function AllPicksPage({ me }: { me: Me }) {
 
   const teamById = new Map<number, Team>(fixtures.teams.map((t) => [t.id, t]));
   const players = data.participants;
+  const shownPlayers = players.filter((p) => selected.has(p.email));
+
+  const togglePlayer = (email: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(email)) next.delete(email);
+      else next.add(email);
+      return next;
+    });
+  };
 
   const pickLabel = (pick: Pick, m: { home_team_id: number; away_team_id: number }) => {
     if (pick === 'D') return 'Draw';
@@ -84,8 +104,66 @@ export function AllPicksPage({ me }: { me: Me }) {
 
   return (
     <div className="space-y-6">
+      <Toc
+        items={[
+          { id: 'players-picker', label: 'Players' },
+          { id: 'match-picks', label: 'Match Picks' },
+          { id: 'bracket-picks', label: 'Bracket Picks' },
+          { id: 'real-bracket', label: 'Tournament Bracket' },
+        ]}
+      />
       <div className="max-w-5xl mx-auto space-y-6">
-        <Card>
+        <Card id="players-picker" className="scroll-mt-14">
+          <CardHeader>
+            <CardTitle>
+              Players{' '}
+              <span className="text-sm font-normal text-muted-foreground">
+                — showing {shownPlayers.length} of {players.length}
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {players.map((p) => {
+                const on = selected.has(p.email);
+                return (
+                  <button
+                    key={p.email}
+                    type="button"
+                    onClick={() => togglePlayer(p.email)}
+                    aria-pressed={on}
+                    className={`px-2.5 py-1 rounded-full border text-xs transition-colors ${
+                      on
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    }`}
+                  >
+                    {p.display_name}
+                    {p.email === me.email ? ' (you)' : ''}
+                  </button>
+                );
+              })}
+              <span className="mx-1 text-muted-foreground text-xs">·</span>
+              <button
+                type="button"
+                onClick={() => setSelected(new Set(players.map((p) => p.email)))}
+                className="px-2.5 py-1 rounded-full border text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                All
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelected(new Set(players.some((p) => p.email === me.email) ? [me.email] : []))}
+                className="px-2.5 py-1 rounded-full border text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                Just me
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">Pick whose columns to show in the tables below.</p>
+          </CardContent>
+        </Card>
+
+        <Card id="match-picks" className="scroll-mt-14">
           <CardHeader>
             <CardTitle>Match Picks</CardTitle>
           </CardHeader>
@@ -99,7 +177,7 @@ export function AllPicksPage({ me }: { me: Me }) {
                   <tr className="border-b text-left text-muted-foreground">
                     <th className="py-1.5 pr-3 whitespace-nowrap">Match</th>
                     <th className="py-1.5 pr-3">Result</th>
-                    {players.map((p) => (
+                    {shownPlayers.map((p) => (
                       <th key={p.email} className="py-1.5 px-2 whitespace-nowrap">
                         {p.display_name}
                       </th>
@@ -116,7 +194,7 @@ export function AllPicksPage({ me }: { me: Me }) {
                       <td className="py-1.5 pr-3 font-medium whitespace-nowrap">
                         {m.actual_result === null ? '·' : pickLabel(m.actual_result, m)}
                       </td>
-                      {players.map((p) => {
+                      {shownPlayers.map((p) => {
                         const pick = matchPickMap.get(`${p.email}|${m.id}`);
                         const correct = pick !== undefined && m.actual_result !== null && pick === m.actual_result;
                         return (
@@ -136,7 +214,7 @@ export function AllPicksPage({ me }: { me: Me }) {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card id="bracket-picks" className="scroll-mt-14">
           <CardHeader>
             <CardTitle>Bracket Picks</CardTitle>
           </CardHeader>
@@ -151,7 +229,7 @@ export function AllPicksPage({ me }: { me: Me }) {
                   <tr className="border-b text-left text-muted-foreground">
                     <th className="py-1.5 pr-3">Team</th>
                     <th className="py-1.5 pr-3">Reached</th>
-                    {players.map((p) => (
+                    {shownPlayers.map((p) => (
                       <th key={p.email} className="py-1.5 px-2 whitespace-nowrap">
                         {p.display_name}
                       </th>
@@ -168,7 +246,7 @@ export function AllPicksPage({ me }: { me: Me }) {
                       <td className="py-1.5 pr-3 font-medium">
                         {t.actual_stage === null ? '·' : STAGE_SHORT[t.actual_stage]}
                       </td>
-                      {players.map((p) => {
+                      {shownPlayers.map((p) => {
                         const stage = bracketPickMap.get(`${p.email}|${t.id}`);
                         return (
                           <td key={p.email} className="py-1.5 px-2 text-center">
@@ -185,7 +263,7 @@ export function AllPicksPage({ me }: { me: Me }) {
         </Card>
       </div>
 
-      <div className="max-w-[1180px] mx-auto">
+      <div id="real-bracket" className="max-w-[1180px] mx-auto scroll-mt-14">
         <BracketCard
           nodes={realBracket}
           teamById={teamById}

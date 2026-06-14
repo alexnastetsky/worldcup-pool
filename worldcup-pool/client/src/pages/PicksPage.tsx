@@ -12,6 +12,7 @@ import {
   winnersFromStages,
 } from '../lib/bracket';
 import { BracketCard } from './BracketCard';
+import { Toc } from '../components/Toc';
 
 interface MinePayload {
   matchPicks: { match_id: number; pick: Pick }[];
@@ -145,8 +146,17 @@ export function PicksPage({ me }: { me: Me }) {
 
   return (
     <div className="space-y-4 pb-8">
+      <Toc
+        items={[
+          { id: 'predictions', label: 'My Predictions' },
+          ...(!locked ? [{ id: 'players', label: "Who's in" }] : []),
+          'Groups:',
+          ...GROUP_LETTERS.map((g) => ({ id: `group-${g.toLowerCase()}`, label: g })),
+          { id: 'bracket', label: 'Bracket' },
+        ]}
+      />
       <div className="max-w-4xl mx-auto space-y-4">
-        <Card>
+        <Card id="predictions" className="scroll-mt-14">
           <CardHeader>
             <CardTitle>My Predictions</CardTitle>
           </CardHeader>
@@ -191,7 +201,7 @@ export function PicksPage({ me }: { me: Me }) {
         </Card>
 
         {!locked && (
-          <Card>
+          <Card id="players" className="scroll-mt-14">
             <CardHeader>
               <CardTitle>
                 Who&apos;s in ({participants.length} player{participants.length === 1 ? '' : 's'})
@@ -241,7 +251,7 @@ export function PicksPage({ me }: { me: Me }) {
         ))}
       </div>
 
-      <div className="max-w-[1180px] mx-auto">
+      <div id="bracket" className="max-w-[1180px] mx-auto scroll-mt-14">
         <BracketCard
           nodes={nodes}
           teamById={teamById}
@@ -293,7 +303,7 @@ function GroupCard(props: {
 }) {
   const { group, matches, teamById, picks, standing, locked, onPick } = props;
   return (
-    <Card>
+    <Card id={`group-${group.toLowerCase()}`} className="scroll-mt-14">
       <CardHeader>
         <CardTitle>Group {group}</CardTitle>
       </CardHeader>

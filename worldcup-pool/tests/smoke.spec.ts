@@ -14,7 +14,9 @@ test('smoke test - app loads and displays picks page', async ({ page }) => {
   await page.goto('/');
 
   await expect(page.getByRole('heading', { name: 'World Cup 2026 Pool' })).toBeVisible();
-  await expect(page.getByText('My Predictions')).toBeVisible();
+  // 'My Predictions' appears both as a TOC pill and a card title — check both.
+  await expect(page.getByRole('link', { name: 'My Predictions' })).toBeVisible();
+  await expect(page.locator('#predictions').getByText('My Predictions')).toBeVisible();
   await expect(page.getByText('Group A', { exact: true })).toBeVisible();
 
   await expect(page.getByRole('link', { name: 'My Picks' })).toBeVisible();
