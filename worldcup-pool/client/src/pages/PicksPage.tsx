@@ -316,7 +316,7 @@ function GroupCard(props: {
             return (
               <div key={m.id} className="flex flex-wrap items-center gap-2 border-b pb-2 last:border-b-0">
                 <span className="text-xs text-muted-foreground w-14 shrink-0">{formatDate(m.match_date)}</span>
-                <div className="flex gap-1 flex-1 min-w-[260px]">
+                <div className="flex gap-1 flex-1 min-w-0 sm:min-w-[260px]">
                   <PickButton
                     label={home}
                     active={current === 'H'}
@@ -370,7 +370,7 @@ function PickButton(props: { label: string; active: boolean; disabled: boolean; 
       type="button"
       onClick={props.onClick}
       disabled={props.disabled}
-      className={`flex-1 px-2 py-1.5 rounded-md text-sm border transition-colors truncate ${
+      className={`flex-1 px-2 py-2.5 md:py-1.5 rounded-md text-sm border transition-colors truncate ${
         props.active ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted disabled:opacity-60'
       }`}
     >

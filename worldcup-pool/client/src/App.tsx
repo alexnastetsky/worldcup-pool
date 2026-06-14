@@ -16,8 +16,8 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 function Layout({ me, refreshMe }: { me: Me; refreshMe: () => void }) {
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <header className="border-b px-4 md:px-6 py-3 flex flex-wrap items-center gap-3">
-        <h1 className="text-lg font-semibold text-foreground">
+      <header className="border-b px-3 md:px-6 py-2.5 md:py-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <h1 className="text-base md:text-lg font-semibold text-foreground">
           <Link to="/" className="hover:opacity-80 transition-opacity">
             ⚽ World Cup 2026 Pool
           </Link>

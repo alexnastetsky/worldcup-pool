@@ -10,7 +10,7 @@ export function Toc({ items }: { items: (TocItem | string)[] }) {
   return (
     <nav
       aria-label="Page sections"
-      className="sticky top-0 z-10 -mx-4 px-4 py-2 bg-background/95 backdrop-blur border-b flex flex-wrap items-center gap-1.5 text-xs"
+      className="sticky top-0 z-10 -mx-4 px-4 py-2 bg-background/95 backdrop-blur border-b flex flex-nowrap md:flex-wrap overflow-x-auto items-center gap-1.5 text-xs"
     >
       {items.map((item) =>
         typeof item === 'string' ? (

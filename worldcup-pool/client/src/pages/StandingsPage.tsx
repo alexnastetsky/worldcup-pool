@@ -57,9 +57,18 @@ export function StandingsPage({ me }: { me: Me }) {
                   <tr className="border-b text-left text-muted-foreground">
                     <th className="py-2 pr-2 w-8">#</th>
                     <th className="py-2 pr-2">Player</th>
-                    <th className="py-2 pr-2 text-right">Group</th>
-                    <th className="py-2 pr-2 text-right">Bracket</th>
-                    <th className="py-2 pr-2 text-right">Total</th>
+                    <th className="py-2 pr-2 text-right">
+                      <span className="sm:hidden">Grp</span>
+                      <span className="hidden sm:inline">Group</span>
+                    </th>
+                    <th className="py-2 pr-2 text-right">
+                      <span className="sm:hidden">Brk</span>
+                      <span className="hidden sm:inline">Bracket</span>
+                    </th>
+                    <th className="py-2 pr-2 text-right">
+                      <span className="sm:hidden">Tot</span>
+                      <span className="hidden sm:inline">Total</span>
+                    </th>
                     <th className="py-2 text-right">Max</th>
                   </tr>
                 </thead>

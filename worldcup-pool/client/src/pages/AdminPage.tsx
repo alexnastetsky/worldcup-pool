@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Skeleton } from '@databricks/appkit-ui/react';
 import type { Fixtures, Me, Pick, Team } from '../lib/pool';
-import { STAGE_NAMES, fetchJson, formatDate, formatLongDate, sendJson } from '../lib/pool';
+import { STAGE_NAMES, fetchJson, formatDate, formatLongDate, sendJson, teamCode } from '../lib/pool';
 import { Toc } from '../components/Toc';
 
 interface SyncStatus {
@@ -161,27 +161,36 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
                       const home = teamById.get(m.home_team_id)?.name ?? '?';
                       const away = teamById.get(m.away_team_id)?.name ?? '?';
                       return (
-                        <div key={m.id} className="flex flex-wrap items-center gap-1.5 text-sm">
-                          <span className="text-xs text-muted-foreground w-6 shrink-0">{m.group_letter}</span>
-                          <span className="flex-1 min-w-[180px] truncate">
-                            {home} – {away}
-                          </span>
-                          <ResultButton
-                            label={home}
-                            active={m.actual_result === 'H'}
-                            onClick={() => setMatchResult(m.id, 'H')}
-                          />
-                          <ResultButton
-                            label="Draw"
-                            active={m.actual_result === 'D'}
-                            onClick={() => setMatchResult(m.id, 'D')}
-                          />
-                          <ResultButton
-                            label={away}
-                            active={m.actual_result === 'A'}
-                            onClick={() => setMatchResult(m.id, 'A')}
-                          />
-                          <ResultButton label="✕" active={false} onClick={() => setMatchResult(m.id, null)} />
+                        <div
+                          key={m.id}
+                          className="flex flex-col gap-1 border-b pb-2 last:border-0 last:pb-0 sm:flex-row sm:items-center sm:gap-1.5 sm:border-0 sm:pb-0 text-sm"
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0 sm:flex-1">
+                            <span className="text-xs text-muted-foreground w-6 shrink-0">{m.group_letter}</span>
+                            <span className="truncate">
+                              {home} – {away}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <ResultButton
+                              label={home}
+                              shortLabel={teamCode(home)}
+                              active={m.actual_result === 'H'}
+                              onClick={() => setMatchResult(m.id, 'H')}
+                            />
+                            <ResultButton
+                              label="Draw"
+                              active={m.actual_result === 'D'}
+                              onClick={() => setMatchResult(m.id, 'D')}
+                            />
+                            <ResultButton
+                              label={away}
+                              shortLabel={teamCode(away)}
+                              active={m.actual_result === 'A'}
+                              onClick={() => setMatchResult(m.id, 'A')}
+                            />
+                            <ResultButton label="✕" active={false} onClick={() => setMatchResult(m.id, null)} />
+                          </div>
                         </div>
                       );
                     })}
@@ -212,7 +221,7 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
                     <span className="flex-1 truncate">{t.name}</span>
                     <select
                       aria-label={`Stage reached by ${t.name}`}
-                      className={`border rounded-md px-2 py-1 text-sm bg-background ${
+                      className={`border rounded-md px-2 py-1.5 md:py-1 text-sm bg-background ${
                         t.actual_stage === null ? 'text-muted-foreground' : ''
                       }`}
                       value={t.actual_stage ?? ''}
@@ -271,16 +280,24 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
   );
 }
 
-function ResultButton(props: { label: string; active: boolean; onClick: () => void }) {
+function ResultButton(props: { label: string; shortLabel?: string; active: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={props.onClick}
-      className={`px-2 py-1 rounded-md text-xs border transition-colors max-w-[110px] truncate ${
+      title={props.label}
+      className={`px-2 py-1.5 md:py-1 rounded-md text-xs border transition-colors max-w-[110px] truncate ${
         props.active ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted'
       }`}
     >
-      {props.label}
+      {props.shortLabel ? (
+        <>
+          <span className="sm:hidden">{props.shortLabel}</span>
+          <span className="hidden sm:inline">{props.label}</span>
+        </>
+      ) : (
+        props.label
+      )}
     </button>
   );
 }

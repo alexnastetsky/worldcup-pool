@@ -166,9 +166,10 @@ export function AllPicksPage({ me }: { me: Me }) {
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground mb-3">
-              Cells show the FIFA country code of the team picked to win, or &quot;draw&quot; — hover for the full
-              name. Green = correct (result is in).
+              Cells show the FIFA country code of the team picked to win, or &quot;draw&quot; — hover for the full name.
+              Green = correct (result is in).
             </p>
+            <p className="text-[10px] text-muted-foreground sm:hidden mb-1">Swipe sideways to see more →</p>
             <div className="overflow-x-auto">
               <table className="text-xs min-w-full">
                 <thead>
@@ -191,7 +192,13 @@ export function AllPicksPage({ me }: { me: Me }) {
                     <tr key={m.id} className="border-b last:border-b-0">
                       <td className="py-1.5 pr-2 whitespace-nowrap">
                         <span className="text-muted-foreground mr-1">{m.group_letter}</span>
-                        {teamById.get(m.home_team_id)?.name} – {teamById.get(m.away_team_id)?.name}
+                        <span className="sm:hidden">
+                          {teamCode(teamById.get(m.home_team_id)?.name ?? '?')} –{' '}
+                          {teamCode(teamById.get(m.away_team_id)?.name ?? '?')}
+                        </span>
+                        <span className="hidden sm:inline">
+                          {teamById.get(m.home_team_id)?.name} – {teamById.get(m.away_team_id)?.name}
+                        </span>
                       </td>
                       <td
                         className="py-1.5 pr-2 font-medium whitespace-nowrap"
@@ -229,6 +236,7 @@ export function AllPicksPage({ me }: { me: Me }) {
               Predicted furthest stage per team. — = out in groups, R32/R16/QF/SF/F, 🏆 = champion. Reached shows ·
               until a team&apos;s fate is decided.
             </p>
+            <p className="text-[10px] text-muted-foreground sm:hidden mb-1">Swipe sideways to see more →</p>
             <div className="overflow-x-auto">
               <table className="text-xs min-w-full">
                 <thead>
@@ -251,7 +259,8 @@ export function AllPicksPage({ me }: { me: Me }) {
                     <tr key={t.id} className="border-b last:border-b-0">
                       <td className="py-1.5 pr-2 whitespace-nowrap">
                         <span className="text-muted-foreground mr-1">{t.group_letter}</span>
-                        {t.name}
+                        <span className="sm:hidden">{teamCode(t.name)}</span>
+                        <span className="hidden sm:inline">{t.name}</span>
                       </td>
                       <td className="py-1.5 pr-2 font-medium">
                         {t.actual_stage === null ? '·' : STAGE_SHORT[t.actual_stage]}
