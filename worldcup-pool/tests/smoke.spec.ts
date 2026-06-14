@@ -10,29 +10,27 @@ let consoleErrors: string[] = [];
 let pageErrors: string[] = [];
 let failedRequests: string[] = [];
 
-test('smoke test - app loads and displays picks page', async ({ page }) => {
+test('smoke test - app loads with standings as the landing page', async ({ page }) => {
   await page.goto('/');
 
   await expect(page.getByRole('heading', { name: 'World Cup 2026 Pool' })).toBeVisible();
-  // 'My Predictions' appears both as a TOC pill and a card title — check both.
-  await expect(page.getByRole('link', { name: 'My Predictions' })).toBeVisible();
-  await expect(page.locator('#predictions').getByText('My Predictions')).toBeVisible();
-  await expect(page.getByText('Group A', { exact: true })).toBeVisible();
-
-  await expect(page.getByRole('link', { name: 'My Picks' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Standings' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'My Picks' })).toBeVisible();
   await expect(page.getByRole('link', { name: "Everyone's Picks" })).toBeVisible();
-});
 
-test('smoke test - standings page gated until lock or visible', async ({ page }) => {
-  await page.goto('/standings');
-
-  // Either the pre-lock notice or the live standings table is shown.
+  // '/' renders standings: either the pre-lock notice or the live table.
   await expect(
     page
       .getByText('Standings appear once submissions are locked.')
       .or(page.getByRole('columnheader', { name: 'Player' }))
   ).toBeVisible();
+});
+
+test('smoke test - my picks page shows the predictions form', async ({ page }) => {
+  await page.goto('/my-picks');
+
+  await expect(page.locator('#predictions').getByText('My Predictions')).toBeVisible();
+  await expect(page.getByText('Group A', { exact: true })).toBeVisible();
 });
 
 // ── Lifecycle hooks ─────────────────────────────────────────────────────────
