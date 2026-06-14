@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { Application, Request, Response } from 'express';
 import { SEED_TEAMS, SEED_MATCHES } from '../seed-data';
+import { syncResults } from '../results-sync';
+
+const SYNC_INTERVAL_MS = 30 * 60 * 1000;
 
 interface AppKitWithLakebase {
   lakebase: {
@@ -145,6 +148,22 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
       'ALTER TABLE pool.teams ADD COLUMN IF NOT EXISTS eliminated BOOLEAN NOT NULL DEFAULT FALSE'
     );
 
+    // Migration: manual-override flags so the ESPN auto-sync never clobbers a
+    // result an admin set by hand; plus a row tracking the last sync.
+    await appkit.lakebase.query(
+      'ALTER TABLE pool.matches ADD COLUMN IF NOT EXISTS result_manual BOOLEAN NOT NULL DEFAULT FALSE'
+    );
+    await appkit.lakebase.query(
+      'ALTER TABLE pool.teams ADD COLUMN IF NOT EXISTS stage_manual BOOLEAN NOT NULL DEFAULT FALSE'
+    );
+    await appkit.lakebase.query(`
+      CREATE TABLE IF NOT EXISTS pool.sync_state (
+        id INT PRIMARY KEY CHECK (id = 1),
+        last_synced_at TIMESTAMPTZ,
+        status TEXT
+      )
+    `);
+
     const { rows } = await appkit.lakebase.query('SELECT COUNT(*)::int AS n FROM pool.teams');
     if ((rows[0] as { n: number }).n === 0) {
       for (const t of SEED_TEAMS) {
@@ -168,6 +187,15 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
     console.warn('[pool] Database setup failed:', (err as Error).message);
     console.warn('[pool] Routes will be registered but may return errors');
   }
+
+  // Auto-pull results from ESPN: a full sweep at startup, then a rolling
+  // window every 30 minutes. Errors are swallowed (recorded in sync_state).
+  const runSync = (allDates: boolean) =>
+    syncResults(appkit, { allDates })
+      .then((s) => console.log(`[pool] results sync: ${JSON.stringify(s)}`))
+      .catch((e) => console.warn('[pool] results sync failed:', (e as Error).message));
+  void runSync(true);
+  setInterval(() => void runSync(false), SYNC_INTERVAL_MS);
 
   async function getLocked(): Promise<boolean> {
     const { rows } = await appkit.lakebase.query('SELECT locked FROM pool.app_state WHERE id = 1');
@@ -397,7 +425,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
           return;
         }
         const { rows } = await appkit.lakebase.query(
-          'UPDATE pool.matches SET actual_result = $2 WHERE id = $1 RETURNING id',
+          'UPDATE pool.matches SET actual_result = $2, result_manual = TRUE WHERE id = $1 RETURNING id',
           [id, parsed.data.result]
         );
         if (rows.length === 0) {
@@ -423,7 +451,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
         // team cannot be eliminated yet.
         const eliminated = stage === 0 ? true : stage === null ? false : parsed.data.eliminated;
         const { rows } = await appkit.lakebase.query(
-          'UPDATE pool.teams SET actual_stage = $2, eliminated = $3 WHERE id = $1 RETURNING id',
+          'UPDATE pool.teams SET actual_stage = $2, eliminated = $3, stage_manual = TRUE WHERE id = $1 RETURNING id',
           [id, stage, eliminated]
         );
         if (rows.length === 0) {
@@ -443,12 +471,33 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
         await appkit.lakebase.query('DELETE FROM pool.match_predictions');
         await appkit.lakebase.query('DELETE FROM pool.bracket_predictions');
         await appkit.lakebase.query('DELETE FROM pool.participants');
-        await appkit.lakebase.query('UPDATE pool.matches SET actual_result = NULL');
-        await appkit.lakebase.query('UPDATE pool.teams SET actual_stage = NULL, eliminated = FALSE');
+        await appkit.lakebase.query('UPDATE pool.matches SET actual_result = NULL, result_manual = FALSE');
+        await appkit.lakebase.query(
+          'UPDATE pool.teams SET actual_stage = NULL, eliminated = FALSE, stage_manual = FALSE'
+        );
         await appkit.lakebase.query('UPDATE pool.app_state SET locked = FALSE, locked_at = NULL WHERE id = 1');
         res.json({ ok: true });
       } catch (err) {
         handleError(res, 'Failed to reset pool', err);
+      }
+    });
+
+    // Auto-sync status (any signed-in user) and a manual "Sync now" (admin).
+    app.get('/api/sync-status', async (_req, res) => {
+      try {
+        const { rows } = await appkit.lakebase.query('SELECT last_synced_at, status FROM pool.sync_state WHERE id = 1');
+        res.json(rows[0] ?? { last_synced_at: null, status: null });
+      } catch (err) {
+        handleError(res, 'Failed to load sync status', err);
+      }
+    });
+
+    app.post('/api/admin/sync', adminOnly, async (_req, res) => {
+      try {
+        const summary = await syncResults(appkit, { allDates: true });
+        res.json(summary);
+      } catch (err) {
+        handleError(res, 'Failed to sync results', err);
       }
     });
   });

@@ -97,7 +97,7 @@ export function AllPicksPage({ me }: { me: Me }) {
     return teamById.get(teamId)?.name ?? '?';
   };
   const pickShort = (pick: Pick, m: { home_team_id: number; away_team_id: number }) =>
-    pick === 'D' ? 'tie' : teamCode(pickFull(pick, m));
+    pick === 'D' ? 'draw' : teamCode(pickFull(pick, m));
 
   return (
     <div className="space-y-6">
@@ -166,7 +166,7 @@ export function AllPicksPage({ me }: { me: Me }) {
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground mb-3">
-              Cells show the FIFA country code of the team picked to win (&quot;tie&quot; = draw) — hover for the full
+              Cells show the FIFA country code of the team picked to win, or &quot;draw&quot; — hover for the full
               name. Green = correct (result is in).
             </p>
             <div className="overflow-x-auto">

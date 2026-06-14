@@ -4,11 +4,17 @@ import type { Fixtures, Me, Pick, Team } from '../lib/pool';
 import { STAGE_NAMES, fetchJson, formatDate, formatLongDate, sendJson } from '../lib/pool';
 import { Toc } from '../components/Toc';
 
+interface SyncStatus {
+  last_synced_at: string | null;
+  status: string | null;
+}
+
 export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => void }) {
   const [fixtures, setFixtures] = useState<Fixtures | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resetText, setResetText] = useState('');
   const [busy, setBusy] = useState(false);
+  const [sync, setSync] = useState<SyncStatus | null>(null);
 
   const loadFixtures = () => {
     fetchJson<Fixtures>('/api/fixtures')
@@ -16,7 +22,16 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load fixtures'));
   };
 
-  useEffect(loadFixtures, []);
+  const loadSync = () => {
+    fetchJson<SyncStatus>('/api/sync-status')
+      .then(setSync)
+      .catch(() => undefined);
+  };
+
+  useEffect(() => {
+    loadFixtures();
+    loadSync();
+  }, []);
 
   const teamById = useMemo(() => new Map<number, Team>(fixtures?.teams.map((t) => [t.id, t]) ?? []), [fixtures]);
 
@@ -68,11 +83,20 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
     });
   };
 
+  const syncNow = () => {
+    run(async () => {
+      await sendJson('/api/admin/sync', 'POST');
+      loadSync();
+      loadFixtures();
+    });
+  };
+
   return (
     <div className="max-w-3xl mx-auto space-y-4">
       <Toc
         items={[
           { id: 'submissions', label: 'Submissions' },
+          { id: 'sync', label: 'Results Sync' },
           { id: 'results', label: 'Match Results' },
           ...matchDates.map((d) => ({ id: `results-${d}`, label: formatDate(d) })),
           { id: 'teams', label: 'Team Progress' },
@@ -93,6 +117,29 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
             {me.locked ? 'Unlock submissions' : 'Lock submissions (finish sign-ups)'}
           </Button>
           {error && <p className="text-sm text-destructive">{error}</p>}
+        </CardContent>
+      </Card>
+
+      <Card id="sync" className="scroll-mt-14">
+        <CardHeader>
+          <CardTitle>Results Sync</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <p className="text-sm text-muted-foreground">
+            Match results and team progress auto-fill from ESPN every ~30 minutes as games finish. Your manual edits
+            below always win and are never overwritten.
+          </p>
+          <div className="flex items-center gap-3">
+            <Button onClick={syncNow} disabled={busy} variant="outline">
+              Sync now
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              {sync?.last_synced_at
+                ? `Last synced ${new Date(sync.last_synced_at).toLocaleString()}`
+                : 'Not synced yet'}
+            </span>
+          </div>
+          {sync?.status && <p className="text-xs text-muted-foreground">{sync.status}</p>}
         </CardContent>
       </Card>
 
