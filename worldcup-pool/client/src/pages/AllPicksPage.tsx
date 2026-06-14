@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, Skeleton } from '@databricks/appkit-ui/react';
 import type { Fixtures, Me, Pick, Team } from '../lib/pool';
-import { STAGE_SHORT, fetchJson } from '../lib/pool';
+import { STAGE_SHORT, fetchJson, teamCode } from '../lib/pool';
 import {
   bracketProgress,
   buildBracket,
@@ -30,17 +30,11 @@ export function AllPicksPage({ me }: { me: Me }) {
       .then(([fx, all]) => {
         setFixtures(fx);
         setData(all);
-        // Default columns: everyone when the pool is small, otherwise just
-        // the viewer (or the first player if the viewer hasn't submitted).
-        const emails = all.participants.map((p) => p.email);
-        if (emails.length <= 4) {
-          setSelected(new Set(emails));
-        } else {
-          setSelected(new Set([emails.includes(me.email) ? me.email : emails[0]]));
-        }
+        // Show every player's column by default; the picker can narrow it.
+        setSelected(new Set(all.participants.map((p) => p.email)));
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load picks'));
-  }, [me.locked, me.email]);
+  }, [me.locked]);
 
   const matchPickMap = useMemo(() => {
     const map = new Map<string, Pick>();
@@ -96,11 +90,14 @@ export function AllPicksPage({ me }: { me: Me }) {
     });
   };
 
-  const pickLabel = (pick: Pick, m: { home_team_id: number; away_team_id: number }) => {
+  // Full name (for hover/title) and short code (for the grid cell).
+  const pickFull = (pick: Pick, m: { home_team_id: number; away_team_id: number }) => {
     if (pick === 'D') return 'Draw';
     const teamId = pick === 'H' ? m.home_team_id : m.away_team_id;
     return teamById.get(teamId)?.name ?? '?';
   };
+  const pickShort = (pick: Pick, m: { home_team_id: number; away_team_id: number }) =>
+    pick === 'D' ? 'tie' : teamCode(pickFull(pick, m));
 
   return (
     <div className="space-y-6">
@@ -112,7 +109,7 @@ export function AllPicksPage({ me }: { me: Me }) {
           { id: 'real-bracket', label: 'Tournament Bracket' },
         ]}
       />
-      <div className="max-w-5xl mx-auto space-y-6">
+      <div className="max-w-6xl mx-auto space-y-6">
         <Card id="players-picker" className="scroll-mt-14">
           <CardHeader>
             <CardTitle>
@@ -169,16 +166,21 @@ export function AllPicksPage({ me }: { me: Me }) {
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground mb-3">
-              Each cell shows the team picked to win (or Draw). Green = correct (result is in).
+              Cells show the FIFA country code of the team picked to win (&quot;tie&quot; = draw) — hover for the full
+              name. Green = correct (result is in).
             </p>
             <div className="overflow-x-auto">
-              <table className="text-sm min-w-full">
+              <table className="text-xs min-w-full">
                 <thead>
                   <tr className="border-b text-left text-muted-foreground">
-                    <th className="py-1.5 pr-3 whitespace-nowrap">Match</th>
-                    <th className="py-1.5 pr-3">Result</th>
+                    <th className="py-1.5 pr-2 whitespace-nowrap">Match</th>
+                    <th className="py-1.5 pr-2">Res</th>
                     {shownPlayers.map((p) => (
-                      <th key={p.email} className="py-1.5 px-2 whitespace-nowrap">
+                      <th
+                        key={p.email}
+                        title={p.display_name}
+                        className="py-1.5 px-1.5 text-center max-w-[68px] truncate"
+                      >
                         {p.display_name}
                       </th>
                     ))}
@@ -187,12 +189,15 @@ export function AllPicksPage({ me }: { me: Me }) {
                 <tbody>
                   {fixtures.matches.map((m) => (
                     <tr key={m.id} className="border-b last:border-b-0">
-                      <td className="py-1.5 pr-3 whitespace-nowrap">
+                      <td className="py-1.5 pr-2 whitespace-nowrap">
                         <span className="text-muted-foreground mr-1">{m.group_letter}</span>
                         {teamById.get(m.home_team_id)?.name} – {teamById.get(m.away_team_id)?.name}
                       </td>
-                      <td className="py-1.5 pr-3 font-medium whitespace-nowrap">
-                        {m.actual_result === null ? '·' : pickLabel(m.actual_result, m)}
+                      <td
+                        className="py-1.5 pr-2 font-medium whitespace-nowrap"
+                        title={m.actual_result === null ? undefined : pickFull(m.actual_result, m)}
+                      >
+                        {m.actual_result === null ? '·' : pickShort(m.actual_result, m)}
                       </td>
                       {shownPlayers.map((p) => {
                         const pick = matchPickMap.get(`${p.email}|${m.id}`);
@@ -200,9 +205,10 @@ export function AllPicksPage({ me }: { me: Me }) {
                         return (
                           <td
                             key={p.email}
-                            className={`py-1.5 px-2 text-center whitespace-nowrap ${correct ? 'bg-green-100 dark:bg-green-900 font-semibold' : ''}`}
+                            title={pick === undefined ? undefined : pickFull(pick, m)}
+                            className={`py-1.5 px-1.5 text-center whitespace-nowrap ${correct ? 'bg-green-100 dark:bg-green-900 font-semibold' : ''}`}
                           >
-                            {pick === undefined ? '·' : pickLabel(pick, m)}
+                            {pick === undefined ? '·' : pickShort(pick, m)}
                           </td>
                         );
                       })}
@@ -224,13 +230,17 @@ export function AllPicksPage({ me }: { me: Me }) {
               until a team&apos;s fate is decided.
             </p>
             <div className="overflow-x-auto">
-              <table className="text-sm min-w-full">
+              <table className="text-xs min-w-full">
                 <thead>
                   <tr className="border-b text-left text-muted-foreground">
-                    <th className="py-1.5 pr-3">Team</th>
-                    <th className="py-1.5 pr-3">Reached</th>
+                    <th className="py-1.5 pr-2">Team</th>
+                    <th className="py-1.5 pr-2">Reached</th>
                     {shownPlayers.map((p) => (
-                      <th key={p.email} className="py-1.5 px-2 whitespace-nowrap">
+                      <th
+                        key={p.email}
+                        title={p.display_name}
+                        className="py-1.5 px-1.5 text-center max-w-[68px] truncate"
+                      >
                         {p.display_name}
                       </th>
                     ))}
@@ -239,17 +249,17 @@ export function AllPicksPage({ me }: { me: Me }) {
                 <tbody>
                   {fixtures.teams.map((t) => (
                     <tr key={t.id} className="border-b last:border-b-0">
-                      <td className="py-1.5 pr-3 whitespace-nowrap">
+                      <td className="py-1.5 pr-2 whitespace-nowrap">
                         <span className="text-muted-foreground mr-1">{t.group_letter}</span>
                         {t.name}
                       </td>
-                      <td className="py-1.5 pr-3 font-medium">
+                      <td className="py-1.5 pr-2 font-medium">
                         {t.actual_stage === null ? '·' : STAGE_SHORT[t.actual_stage]}
                       </td>
                       {shownPlayers.map((p) => {
                         const stage = bracketPickMap.get(`${p.email}|${t.id}`);
                         return (
-                          <td key={p.email} className="py-1.5 px-2 text-center">
+                          <td key={p.email} className="py-1.5 px-1.5 text-center">
                             {stage === undefined ? '·' : STAGE_SHORT[stage]}
                           </td>
                         );

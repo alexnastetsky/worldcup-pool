@@ -18,6 +18,8 @@ export default tseslint.config(
       '**.databricks/**',
       'tests/**',
       '**/.smoke-test/**',
+      // Standalone ops utilities, not part of the app TS project.
+      'scripts/**',
     ],
   },
 

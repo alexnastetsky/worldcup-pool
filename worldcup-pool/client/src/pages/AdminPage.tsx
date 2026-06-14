@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Skeleton } from '@databricks/appkit-ui/react';
 import type { Fixtures, Me, Pick, Team } from '../lib/pool';
-import { GROUP_LETTERS, STAGE_NAMES, fetchJson, formatDate, sendJson } from '../lib/pool';
+import { STAGE_NAMES, fetchJson, formatDate, formatLongDate, sendJson } from '../lib/pool';
 import { Toc } from '../components/Toc';
 
 export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => void }) {
@@ -19,6 +19,10 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
   useEffect(loadFixtures, []);
 
   const teamById = useMemo(() => new Map<number, Team>(fixtures?.teams.map((t) => [t.id, t]) ?? []), [fixtures]);
+
+  // Distinct match dates in chronological order (matches arrive id-ordered =
+  // chronological), so results can be entered in the order games are played.
+  const matchDates = useMemo(() => [...new Set(fixtures?.matches.map((m) => m.match_date) ?? [])], [fixtures]);
 
   if (!me.isAdmin) {
     return <p className="text-center text-muted-foreground mt-12">Admins only.</p>;
@@ -70,7 +74,7 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
         items={[
           { id: 'submissions', label: 'Submissions' },
           { id: 'results', label: 'Match Results' },
-          ...GROUP_LETTERS.map((g) => ({ id: `results-${g.toLowerCase()}`, label: g })),
+          ...matchDates.map((d) => ({ id: `results-${d}`, label: formatDate(d) })),
           { id: 'teams', label: 'Team Progress' },
           { id: 'danger', label: 'Danger Zone' },
         ]}
@@ -100,20 +104,18 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
             <CardTitle>Match Results</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {GROUP_LETTERS.map((g) => (
-              <div key={g} id={`results-${g.toLowerCase()}`} className="scroll-mt-14">
-                <p className="text-sm font-medium mb-1">Group {g}</p>
+            {matchDates.map((date) => (
+              <div key={date} id={`results-${date}`} className="scroll-mt-14">
+                <p className="text-sm font-medium mb-1">{formatLongDate(date)}</p>
                 <div className="space-y-1">
                   {fixtures.matches
-                    .filter((m) => m.group_letter === g)
+                    .filter((m) => m.match_date === date)
                     .map((m) => {
                       const home = teamById.get(m.home_team_id)?.name ?? '?';
                       const away = teamById.get(m.away_team_id)?.name ?? '?';
                       return (
                         <div key={m.id} className="flex flex-wrap items-center gap-1.5 text-sm">
-                          <span className="text-xs text-muted-foreground w-14 shrink-0">
-                            {formatDate(m.match_date)}
-                          </span>
+                          <span className="text-xs text-muted-foreground w-6 shrink-0">{m.group_letter}</span>
                           <span className="flex-1 min-w-[180px] truncate">
                             {home} – {away}
                           </span>

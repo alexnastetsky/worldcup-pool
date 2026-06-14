@@ -26,14 +26,14 @@ if (!sql || !/^\s*(select|with)\b/i.test(sql)) {
 const endpoint = JSON.parse(
   execFileSync('databricks', ['postgres', 'get-endpoint', ENDPOINT, '--profile', 'DEFAULT', '-o', 'json'], {
     encoding: 'utf8',
-  }),
+  })
 );
 const cred = JSON.parse(
   execFileSync(
     'databricks',
     ['postgres', 'generate-database-credential', ENDPOINT, '--profile', 'DEFAULT', '-o', 'json'],
-    { encoding: 'utf8' },
-  ),
+    { encoding: 'utf8' }
+  )
 );
 
 const client = new Client({

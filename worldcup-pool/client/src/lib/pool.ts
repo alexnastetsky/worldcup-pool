@@ -62,6 +62,63 @@ export const STAGE_SHORT = ['—', 'R32', 'R16', 'QF', 'SF', 'F', '🏆'] as con
 
 export const GROUP_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
 
+// FIFA 3-letter country codes, keyed by exact seed team name. Used to keep the
+// many-player comparison grid narrow enough to fit on one screen.
+export const TEAM_CODES: Record<string, string> = {
+  Mexico: 'MEX',
+  'South Africa': 'RSA',
+  'South Korea': 'KOR',
+  Czechia: 'CZE',
+  Canada: 'CAN',
+  'Bosnia and Herzegovina': 'BIH',
+  Qatar: 'QAT',
+  Switzerland: 'SUI',
+  Brazil: 'BRA',
+  Morocco: 'MAR',
+  Haiti: 'HAI',
+  Scotland: 'SCO',
+  'United States': 'USA',
+  Paraguay: 'PAR',
+  Australia: 'AUS',
+  Türkiye: 'TUR',
+  Germany: 'GER',
+  Curaçao: 'CUW',
+  'Ivory Coast': 'CIV',
+  Ecuador: 'ECU',
+  Netherlands: 'NED',
+  Japan: 'JPN',
+  Sweden: 'SWE',
+  Tunisia: 'TUN',
+  Belgium: 'BEL',
+  Egypt: 'EGY',
+  Iran: 'IRN',
+  'New Zealand': 'NZL',
+  Spain: 'ESP',
+  'Cape Verde': 'CPV',
+  'Saudi Arabia': 'KSA',
+  Uruguay: 'URU',
+  France: 'FRA',
+  Senegal: 'SEN',
+  Iraq: 'IRQ',
+  Norway: 'NOR',
+  Argentina: 'ARG',
+  Algeria: 'ALG',
+  Austria: 'AUT',
+  Jordan: 'JOR',
+  Portugal: 'POR',
+  'DR Congo': 'COD',
+  Uzbekistan: 'UZB',
+  Colombia: 'COL',
+  England: 'ENG',
+  Croatia: 'CRO',
+  Ghana: 'GHA',
+  Panama: 'PAN',
+};
+
+export function teamCode(name: string): string {
+  return TEAM_CODES[name] ?? name.slice(0, 3).toUpperCase();
+}
+
 // Cumulative bracket points by stage reached: R32 1, R16 2, QF 3, SF 5,
 // Final 8, Champion 12 → running totals. Mirrors the server's scoring SQL.
 export const CUM_POINTS = [0, 1, 3, 6, 11, 19, 31] as const;
@@ -90,6 +147,15 @@ export async function sendJson(url: string, method: string, body?: unknown): Pro
 export function formatDate(iso: string): string {
   return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', {
     month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+export function formatLongDate(iso: string): string {
+  return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
     day: 'numeric',
     timeZone: 'UTC',
   });
