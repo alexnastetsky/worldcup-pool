@@ -7,6 +7,8 @@ import { PicksPage } from './pages/PicksPage';
 import { StandingsPage } from './pages/StandingsPage';
 import { AllPicksPage } from './pages/AllPicksPage';
 import { AdminPage } from './pages/AdminPage';
+import { RulesPage } from './pages/RulesPage';
+import { TodayPage } from './pages/TodayPage';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
@@ -23,14 +25,20 @@ function Layout({ me, refreshMe }: { me: Me; refreshMe: () => void }) {
           </Link>
         </h1>
         <nav className="flex gap-1 overflow-x-auto">
+          <NavLink to="/" end className={navLinkClass}>
+            Today
+          </NavLink>
           <NavLink to="/my-picks" className={navLinkClass}>
             My Picks
           </NavLink>
-          <NavLink to="/" end className={navLinkClass}>
+          <NavLink to="/standings" className={navLinkClass}>
             Standings
           </NavLink>
           <NavLink to="/picks" className={navLinkClass}>
             Everyone&apos;s Picks
+          </NavLink>
+          <NavLink to="/rules" className={navLinkClass}>
+            Rules
           </NavLink>
           {me.isAdmin && (
             <NavLink to="/admin" className={navLinkClass}>
@@ -92,10 +100,11 @@ export default function App() {
     {
       element: <Layout me={me} refreshMe={refreshMe} />,
       children: [
-        { path: '/', element: <StandingsPage me={me} /> },
+        { path: '/', element: <TodayPage me={me} /> },
         { path: '/my-picks', element: <PicksPage me={me} /> },
         { path: '/standings', element: <StandingsPage me={me} /> },
         { path: '/picks', element: <AllPicksPage me={me} /> },
+        { path: '/rules', element: <RulesPage /> },
         { path: '/admin', element: <AdminPage me={me} onStateChange={refreshMe} /> },
       ],
     },

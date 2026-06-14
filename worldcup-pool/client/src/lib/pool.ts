@@ -22,6 +22,10 @@ export interface Match {
   away_team_id: number;
   match_date: string;
   actual_result: 'H' | 'A' | 'D' | null;
+  // live score/status mirrored from ESPN (display only)
+  home_score: number | null;
+  away_score: number | null;
+  status: 'pre' | 'in' | 'post' | null;
 }
 
 export interface Fixtures {
@@ -38,6 +42,7 @@ export interface StandingRow {
   bracket_points: number;
   total_points: number;
   max_points: number;
+  prev_rank: number | null; // rank at the last daily snapshot, for movement arrows
 }
 
 export interface ParticipantStatus {

@@ -36,8 +36,18 @@ export function StandingsPage({ me }: { me: Me }) {
     return <p className="text-center text-muted-foreground mt-12">Standings appear once submissions are locked.</p>;
   }
 
+  const champion = fixtures?.teams.find((t) => t.actual_stage === 6) ?? null;
+  // Biggest climber since the last daily snapshot.
+  const mover =
+    rows
+      ?.map((r, i) => ({ name: r.display_name, up: r.prev_rank !== null ? r.prev_rank - (i + 1) : 0 }))
+      .filter((m) => m.up > 0)
+      .sort((a, b) => b.up - a.up)[0] ?? null;
+
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="max-w-3xl mx-auto space-y-4">
+      {champion && rows && rows.length > 0 && <Podium rows={rows} championTeam={champion.name} />}
+
       <Card>
         <CardHeader>
           <CardTitle>Standings</CardTitle>
@@ -52,6 +62,12 @@ export function StandingsPage({ me }: { me: Me }) {
                 Max = points still reachable given eliminated teams and remaining matches. Click a row for the
                 breakdown.
               </p>
+              {mover && (
+                <p className="text-xs mb-2">
+                  📈 Biggest mover: <strong>{mover.name}</strong> <span className="text-green-600">▲{mover.up}</span>{' '}
+                  since yesterday
+                </p>
+              )}
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-muted-foreground">
@@ -79,7 +95,10 @@ export function StandingsPage({ me }: { me: Me }) {
                         className={`border-b cursor-pointer hover:bg-muted/50 ${r.email === me.email ? 'font-semibold' : ''}`}
                         onClick={() => setExpanded(expanded === r.email ? null : r.email)}
                       >
-                        <td className="py-2 pr-2">{i + 1}</td>
+                        <td className="py-2 pr-2 whitespace-nowrap">
+                          {i + 1}
+                          <Movement prevRank={r.prev_rank} rank={i + 1} />
+                        </td>
                         <td className="py-2 pr-2">
                           {expanded === r.email ? '▾ ' : '▸ '}
                           {r.display_name}
@@ -105,6 +124,41 @@ export function StandingsPage({ me }: { me: Me }) {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function Movement({ prevRank, rank }: { prevRank: number | null; rank: number }) {
+  if (prevRank === null) return null;
+  const delta = prevRank - rank;
+  if (delta === 0) return <span className="ml-1 text-muted-foreground/60 text-xs">–</span>;
+  return (
+    <span className={`ml-1 text-xs ${delta > 0 ? 'text-green-600' : 'text-destructive'}`}>
+      {delta > 0 ? `▲${delta}` : `▼${-delta}`}
+    </span>
+  );
+}
+
+function Podium({ rows, championTeam }: { rows: StandingRow[]; championTeam: string }) {
+  const top = rows.slice(0, 3);
+  const medals = ['🥇', '🥈', '🥉'];
+  return (
+    <Card className="border-amber-300 dark:border-amber-700">
+      <CardContent className="py-5 text-center space-y-3">
+        <p className="text-lg font-semibold">🏆 Final Results — {championTeam} are World Champions!</p>
+        <div className="flex justify-center items-end gap-3">
+          {top.map((r, i) => (
+            <div
+              key={r.email}
+              className={`rounded-lg border bg-background px-3 ${i === 0 ? 'py-4' : i === 1 ? 'py-3' : 'py-2'}`}
+            >
+              <div className="text-2xl">{medals[i]}</div>
+              <div className="font-medium text-sm mt-1">{r.display_name}</div>
+              <div className="text-xs text-muted-foreground">{r.total_points} pts</div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

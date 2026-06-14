@@ -78,6 +78,7 @@ describe('groupResult orientation', () => {
       homeScore: 2,
       awayScore: 0,
       completed: true,
+      state: 'post',
       winnerId: mexId,
       round: 'group',
     };
@@ -105,6 +106,7 @@ describe('groupResult orientation', () => {
       homeScore: 1,
       awayScore: 1,
       completed: true,
+      state: 'post',
       winnerId: null,
       round: 'group',
     };
@@ -137,6 +139,7 @@ describe('knockoutEffect', () => {
     homeScore: 1,
     awayScore: 0,
     completed: true,
+    state: 'post',
     winnerId: a,
     round: 1,
   };

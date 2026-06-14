@@ -38,6 +38,35 @@ const BRACKET_MAX_SQL = `
     ELSE ${cumulativePointsSql('bp.predicted_stage')}
   END`;
 
+// Per-participant group/bracket/total/max points. Shared by the standings
+// endpoint and the daily snapshot upsert. Ends with a `totals` CTE (starts
+// with WITH, so append more CTEs with a comma or follow with SELECT/INSERT).
+const STANDINGS_TOTALS_CTE = `
+  WITH group_pts AS (
+    SELECT mp.email,
+           SUM(CASE WHEN mp.pick = m.actual_result THEN CASE WHEN m.actual_result = 'D' THEN 2 ELSE 1 END ELSE 0 END) AS pts,
+           SUM(CASE WHEN m.actual_result IS NULL THEN CASE WHEN mp.pick = 'D' THEN 2 ELSE 1 END
+                    WHEN mp.pick = m.actual_result THEN CASE WHEN m.actual_result = 'D' THEN 2 ELSE 1 END
+                    ELSE 0 END) AS max_pts
+    FROM pool.match_predictions mp JOIN pool.matches m ON m.id = mp.match_id
+    GROUP BY mp.email
+  ),
+  bracket_pts AS (
+    SELECT bp.email, SUM(${BRACKET_EARNED_SQL}) AS pts, SUM(${BRACKET_MAX_SQL}) AS max_pts
+    FROM pool.bracket_predictions bp JOIN pool.teams t ON t.id = bp.team_id
+    GROUP BY bp.email
+  ),
+  totals AS (
+    SELECT p.email, p.display_name,
+           COALESCE(g.pts, 0)::int AS group_points,
+           COALESCE(b.pts, 0)::int AS bracket_points,
+           (COALESCE(g.pts, 0) + COALESCE(b.pts, 0))::int AS total_points,
+           (COALESCE(g.max_pts, 0) + COALESCE(b.max_pts, 0))::int AS max_points
+    FROM pool.participants p
+    LEFT JOIN group_pts g ON g.email = p.email
+    LEFT JOIN bracket_pts b ON b.email = p.email
+  )`;
+
 const SETUP_SQL = `
   CREATE SCHEMA IF NOT EXISTS pool;
 
@@ -164,6 +193,20 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
       )
     `);
 
+    // Migration: live score/status per match (display only, mirrors ESPN) and
+    // daily standings snapshots for rank-movement arrows.
+    await appkit.lakebase.query('ALTER TABLE pool.matches ADD COLUMN IF NOT EXISTS home_score INT');
+    await appkit.lakebase.query('ALTER TABLE pool.matches ADD COLUMN IF NOT EXISTS away_score INT');
+    await appkit.lakebase.query('ALTER TABLE pool.matches ADD COLUMN IF NOT EXISTS status TEXT');
+    await appkit.lakebase.query(`
+      CREATE TABLE IF NOT EXISTS pool.standings_snapshots (
+        snapshot_date DATE NOT NULL,
+        email TEXT NOT NULL,
+        total_points INT NOT NULL,
+        PRIMARY KEY (snapshot_date, email)
+      )
+    `);
+
     const { rows } = await appkit.lakebase.query('SELECT COUNT(*)::int AS n FROM pool.teams');
     if ((rows[0] as { n: number }).n === 0) {
       for (const t of SEED_TEAMS) {
@@ -190,10 +233,25 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
 
   // Auto-pull results from ESPN: a full sweep at startup, then a rolling
   // window every 5 minutes. Errors are swallowed (recorded in sync_state).
-  const runSync = (allDates: boolean) =>
-    syncResults(appkit, { allDates })
-      .then((s) => console.log(`[pool] results sync: ${JSON.stringify(s)}`))
-      .catch((e) => console.warn('[pool] results sync failed:', (e as Error).message));
+  // After each sync, while locked, refresh today's standings snapshot so the
+  // rank-movement arrows have a day-over-day baseline.
+  const runSync = async (allDates: boolean) => {
+    try {
+      const s = await syncResults(appkit, { allDates });
+      console.log(`[pool] results sync: ${JSON.stringify(s)}`);
+      const { rows } = await appkit.lakebase.query('SELECT locked FROM pool.app_state WHERE id = 1');
+      if (rows[0]?.locked === true) {
+        await appkit.lakebase.query(`
+          ${STANDINGS_TOTALS_CTE}
+          INSERT INTO pool.standings_snapshots (snapshot_date, email, total_points)
+          SELECT CURRENT_DATE, email, total_points FROM totals
+          ON CONFLICT (snapshot_date, email) DO UPDATE SET total_points = EXCLUDED.total_points
+        `);
+      }
+    } catch (e) {
+      console.warn('[pool] results sync failed:', (e as Error).message);
+    }
+  };
   void runSync(true);
   setInterval(() => void runSync(false), SYNC_INTERVAL_MS);
 
@@ -247,7 +305,8 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
         );
         const matches = await appkit.lakebase.query(
           `SELECT id, group_letter, home_team_id, away_team_id,
-                  TO_CHAR(match_date, 'YYYY-MM-DD') AS match_date, actual_result
+                  TO_CHAR(match_date, 'YYYY-MM-DD') AS match_date,
+                  actual_result, home_score, away_score, status
            FROM pool.matches ORDER BY id`
         );
         res.json({ teams: teams.rows, matches: matches.rows });
@@ -360,37 +419,19 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
           return;
         }
         const { rows } = await appkit.lakebase.query(`
-          WITH group_pts AS (
-            SELECT mp.email,
-                   SUM(CASE WHEN mp.pick = m.actual_result
-                            THEN CASE WHEN m.actual_result = 'D' THEN 2 ELSE 1 END
-                            ELSE 0 END) AS pts,
-                   SUM(CASE WHEN m.actual_result IS NULL
-                            THEN CASE WHEN mp.pick = 'D' THEN 2 ELSE 1 END
-                            WHEN mp.pick = m.actual_result
-                            THEN CASE WHEN m.actual_result = 'D' THEN 2 ELSE 1 END
-                            ELSE 0 END) AS max_pts
-            FROM pool.match_predictions mp
-            JOIN pool.matches m ON m.id = mp.match_id
-            GROUP BY mp.email
-          ),
-          bracket_pts AS (
-            SELECT bp.email,
-                   SUM(${BRACKET_EARNED_SQL}) AS pts,
-                   SUM(${BRACKET_MAX_SQL}) AS max_pts
-            FROM pool.bracket_predictions bp
-            JOIN pool.teams t ON t.id = bp.team_id
-            GROUP BY bp.email
+          ${STANDINGS_TOTALS_CTE},
+          prev AS (
+            SELECT email, RANK() OVER (ORDER BY total_points DESC) AS rk
+            FROM pool.standings_snapshots
+            WHERE snapshot_date = (
+              SELECT MAX(snapshot_date) FROM pool.standings_snapshots WHERE snapshot_date < CURRENT_DATE
+            )
           )
-          SELECT p.email, p.display_name,
-                 COALESCE(g.pts, 0)::int AS group_points,
-                 COALESCE(b.pts, 0)::int AS bracket_points,
-                 (COALESCE(g.pts, 0) + COALESCE(b.pts, 0))::int AS total_points,
-                 (COALESCE(g.max_pts, 0) + COALESCE(b.max_pts, 0))::int AS max_points
-          FROM pool.participants p
-          LEFT JOIN group_pts g ON g.email = p.email
-          LEFT JOIN bracket_pts b ON b.email = p.email
-          ORDER BY total_points DESC, p.display_name
+          SELECT s.email, s.display_name, s.group_points, s.bracket_points,
+                 s.total_points, s.max_points, prev.rk::int AS prev_rank
+          FROM totals s
+          LEFT JOIN prev ON prev.email = s.email
+          ORDER BY s.total_points DESC, s.display_name
         `);
         res.json(rows);
       } catch (err) {
@@ -471,10 +512,13 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
         await appkit.lakebase.query('DELETE FROM pool.match_predictions');
         await appkit.lakebase.query('DELETE FROM pool.bracket_predictions');
         await appkit.lakebase.query('DELETE FROM pool.participants');
-        await appkit.lakebase.query('UPDATE pool.matches SET actual_result = NULL, result_manual = FALSE');
+        await appkit.lakebase.query(
+          'UPDATE pool.matches SET actual_result = NULL, result_manual = FALSE, home_score = NULL, away_score = NULL, status = NULL'
+        );
         await appkit.lakebase.query(
           'UPDATE pool.teams SET actual_stage = NULL, eliminated = FALSE, stage_manual = FALSE'
         );
+        await appkit.lakebase.query('DELETE FROM pool.standings_snapshots');
         await appkit.lakebase.query('UPDATE pool.app_state SET locked = FALSE, locked_at = NULL WHERE id = 1');
         res.json({ ok: true });
       } catch (err) {

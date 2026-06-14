@@ -30,6 +30,9 @@ const fixtures: Fixtures = {
     away_team_id: teamIdByName.get(m.away) as number,
     match_date: m.date,
     actual_result: null,
+    home_score: null,
+    away_score: null,
+    status: null,
   })),
 };
 

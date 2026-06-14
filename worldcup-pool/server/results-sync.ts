@@ -85,6 +85,7 @@ export interface EspnEvent {
   homeScore: number;
   awayScore: number;
   completed: boolean;
+  state: 'pre' | 'in' | 'post'; // ESPN status: scheduled / live / final
   winnerId: number | null; // ESPN's winner flag (accounts for penalties)
   round: Round | null;
 }
@@ -142,6 +143,8 @@ export function parseEspnDay(json: EspnScoreboard): EspnEvent[] {
     const homeScore = parseInt(String(home.score ?? ''), 10);
     const awayScore = parseInt(String(away.score ?? ''), 10);
     const winnerId = home.winner ? homeId : away.winner ? awayId : null;
+    const rawState = comp.status?.type?.state;
+    const state: EspnEvent['state'] = rawState === 'in' || rawState === 'post' ? rawState : 'pre';
     events.push({
       homeName,
       awayName,
@@ -150,6 +153,7 @@ export function parseEspnDay(json: EspnScoreboard): EspnEvent[] {
       homeScore: Number.isNaN(homeScore) ? 0 : homeScore,
       awayScore: Number.isNaN(awayScore) ? 0 : awayScore,
       completed: comp.status?.type?.completed === true,
+      state,
       winnerId,
       round: parseRound(labelText, homeId, awayId),
     });
@@ -318,20 +322,31 @@ export async function syncResults(appkit: AppKitLakebase, opts: { allDates?: boo
       }
     }
 
-    // (a) group results
+    // (a) group results + live score/status (score/status mirror the feed for
+    // display; actual_result is only written on completion and respects the
+    // manual-override flag).
     let groupResults = 0;
     for (const e of events) {
-      if (e.round !== 'group' || !e.completed || e.homeId === null || e.awayId === null) continue;
+      if (e.round !== 'group' || e.homeId === null || e.awayId === null) continue;
       const gm = groupMatchByPair.get(pairKey(e.homeId, e.awayId));
       if (!gm) continue;
-      const result = groupResult(e, gm);
-      const { rows } = await appkit.lakebase.query(
-        `UPDATE pool.matches SET actual_result = $2
-         WHERE id = $1 AND result_manual = FALSE AND actual_result IS DISTINCT FROM $2
-         RETURNING id`,
-        [gm.id, result]
+      const ourHome = e.homeId === gm.homeId ? e.homeScore : e.awayScore;
+      const ourAway = e.homeId === gm.homeId ? e.awayScore : e.homeScore;
+      const live = e.state !== 'pre';
+      await appkit.lakebase.query(
+        `UPDATE pool.matches SET home_score = $2, away_score = $3, status = $4 WHERE id = $1`,
+        [gm.id, live ? ourHome : null, live ? ourAway : null, e.state]
       );
-      groupResults += rows.length;
+      if (e.completed) {
+        const result = groupResult(e, gm);
+        const { rows } = await appkit.lakebase.query(
+          `UPDATE pool.matches SET actual_result = $2
+           WHERE id = $1 AND result_manual = FALSE AND actual_result IS DISTINCT FROM $2
+           RETURNING id`,
+          [gm.id, result]
+        );
+        groupResults += rows.length;
+      }
     }
 
     // (b) qualifiers, once every group result is recorded
