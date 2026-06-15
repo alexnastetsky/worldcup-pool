@@ -5,6 +5,10 @@ import { syncResults } from '../results-sync';
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
+// The current US Eastern calendar date — the whole pool keys date boundaries
+// (matchday, daily standings snapshots) off Eastern time rather than UTC.
+const EASTERN_TODAY_SQL = "(NOW() AT TIME ZONE 'America/New_York')::date";
+
 interface AppKitWithLakebase {
   lakebase: {
     query(text: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
@@ -244,7 +248,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
         await appkit.lakebase.query(`
           ${STANDINGS_TOTALS_CTE}
           INSERT INTO pool.standings_snapshots (snapshot_date, email, total_points)
-          SELECT CURRENT_DATE, email, total_points FROM totals
+          SELECT ${EASTERN_TODAY_SQL}, email, total_points FROM totals
           ON CONFLICT (snapshot_date, email) DO UPDATE SET total_points = EXCLUDED.total_points
         `);
       }
@@ -424,7 +428,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
             SELECT email, RANK() OVER (ORDER BY total_points DESC) AS rk
             FROM pool.standings_snapshots
             WHERE snapshot_date = (
-              SELECT MAX(snapshot_date) FROM pool.standings_snapshots WHERE snapshot_date < CURRENT_DATE
+              SELECT MAX(snapshot_date) FROM pool.standings_snapshots WHERE snapshot_date < ${EASTERN_TODAY_SQL}
             )
           )
           SELECT s.email, s.display_name, s.group_points, s.bracket_points,

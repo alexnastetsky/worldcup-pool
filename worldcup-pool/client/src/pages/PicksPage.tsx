@@ -287,7 +287,8 @@ function SaveStatus({
   }
   return (
     <span className="ml-2 text-muted-foreground">
-      — all changes saved{savedAt ? ` at ${savedAt.toLocaleTimeString()}` : ''}
+      — all changes saved
+      {savedAt ? ` at ${savedAt.toLocaleTimeString('en-US', { timeZone: 'America/New_York' })} ET` : ''}
     </span>
   );
 }

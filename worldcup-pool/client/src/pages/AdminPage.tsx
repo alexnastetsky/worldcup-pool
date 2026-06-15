@@ -135,7 +135,7 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
             </Button>
             <span className="text-xs text-muted-foreground">
               {sync?.last_synced_at
-                ? `Last synced ${new Date(sync.last_synced_at).toLocaleString()}`
+                ? `Last synced ${new Date(sync.last_synced_at).toLocaleString('en-US', { timeZone: 'America/New_York' })} ET`
                 : 'Not synced yet'}
             </span>
           </div>

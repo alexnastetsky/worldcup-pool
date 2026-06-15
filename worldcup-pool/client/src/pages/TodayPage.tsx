@@ -9,11 +9,24 @@ interface AllPicksPayload {
   bracketPicks: { email: string; team_id: number; predicted_stage: number }[];
 }
 
-// Today, or the next/last matchday with games, as YYYY-MM-DD.
+// Current US Eastern calendar date as YYYY-MM-DD — the whole app keys "today"
+// off Eastern time, not the viewer's zone or UTC.
+function easternToday(): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+// Today (Eastern), or the next/last matchday with games, as YYYY-MM-DD.
 function focusMatchDate(matches: Match[]): string | null {
   const dates = [...new Set(matches.map((m) => m.match_date))].sort();
   if (dates.length === 0) return null;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = easternToday();
   if (dates.includes(today)) return today;
   return dates.find((d) => d >= today) ?? dates[dates.length - 1];
 }
@@ -42,7 +55,7 @@ export function TodayPage({ me }: { me: Me }) {
   const focusDate = focusMatchDate(fixtures.matches);
   const matches = fixtures.matches.filter((m) => m.match_date === focusDate);
   const teamById = new Map<number, Team>(fixtures.teams.map((t) => [t.id, t]));
-  const today = new Date().toISOString().slice(0, 10);
+  const today = easternToday();
   const heading =
     focusDate === today ? "Today's Matches" : focusDate ? `Matches — ${formatLongDate(focusDate)}` : 'Matches';
 
