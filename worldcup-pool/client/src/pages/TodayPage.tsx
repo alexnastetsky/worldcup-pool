@@ -22,6 +22,18 @@ function easternToday(): string {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
+// Kickoff time in US Eastern, e.g. "3:00 PM ET".
+function kickoffTime(iso: string | null): string | null {
+  if (!iso) return null;
+  return (
+    new Date(iso).toLocaleTimeString('en-US', {
+      timeZone: 'America/New_York',
+      hour: 'numeric',
+      minute: '2-digit',
+    }) + ' ET'
+  );
+}
+
 // Today (Eastern), or the next/last matchday with games, as YYYY-MM-DD.
 function focusMatchDate(matches: Match[]): string | null {
   const dates = [...new Set(matches.map((m) => m.match_date))].sort();
@@ -69,6 +81,14 @@ export function TodayPage({ me }: { me: Me }) {
       <Card>
         <CardHeader>
           <CardTitle>{heading}</CardTitle>
+          <a
+            href="https://kingdoggydog.github.io/worldcup2026/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-primary underline underline-offset-2 hover:opacity-80"
+          >
+            View full schedule ↗
+          </a>
         </CardHeader>
         <CardContent className="space-y-3">
           {matches.length === 0 && <p className="text-sm text-muted-foreground">No matches scheduled.</p>}
@@ -78,6 +98,7 @@ export function TodayPage({ me }: { me: Me }) {
             const live = m.status === 'in';
             const final = m.status === 'post';
             const score = m.home_score !== null && m.away_score !== null ? `${m.home_score}–${m.away_score}` : null;
+            const kickoff = kickoffTime(m.kickoff_at);
             return (
               <div key={m.id} className="border-b pb-2 last:border-0 last:pb-0">
                 <div className="flex items-center gap-2 text-sm">
@@ -91,17 +112,23 @@ export function TodayPage({ me }: { me: Me }) {
                     </span>
                   </span>
                   {score && <span className="font-semibold tabular-nums">{score}</span>}
-                  <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${
-                      live
-                        ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200'
-                        : final
-                          ? 'bg-muted text-muted-foreground'
-                          : 'border text-muted-foreground'
-                    }`}
-                  >
-                    {live ? 'LIVE' : final ? 'Final' : 'Scheduled'}
-                  </span>
+                  {live ? (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0 bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200">
+                      LIVE
+                    </span>
+                  ) : final ? (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0 bg-muted text-muted-foreground">
+                      Final
+                    </span>
+                  ) : kickoff ? (
+                    <span className="text-xs text-muted-foreground tabular-nums shrink-0 whitespace-nowrap">
+                      {kickoff}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0 border text-muted-foreground">
+                      Scheduled
+                    </span>
+                  )}
                 </div>
                 {allPicks && (
                   <div className="flex flex-wrap sm:grid sm:grid-cols-4 gap-1 mt-1 pl-6">

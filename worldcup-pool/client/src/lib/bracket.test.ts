@@ -33,6 +33,7 @@ const fixtures: Fixtures = {
     home_score: null,
     away_score: null,
     status: null,
+    kickoff_at: null,
   })),
 };
 

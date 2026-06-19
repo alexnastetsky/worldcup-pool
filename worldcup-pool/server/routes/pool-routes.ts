@@ -202,6 +202,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
     await appkit.lakebase.query('ALTER TABLE pool.matches ADD COLUMN IF NOT EXISTS home_score INT');
     await appkit.lakebase.query('ALTER TABLE pool.matches ADD COLUMN IF NOT EXISTS away_score INT');
     await appkit.lakebase.query('ALTER TABLE pool.matches ADD COLUMN IF NOT EXISTS status TEXT');
+    await appkit.lakebase.query('ALTER TABLE pool.matches ADD COLUMN IF NOT EXISTS kickoff_at TIMESTAMPTZ');
     await appkit.lakebase.query(`
       CREATE TABLE IF NOT EXISTS pool.standings_snapshots (
         snapshot_date DATE NOT NULL,
@@ -310,7 +311,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
         const matches = await appkit.lakebase.query(
           `SELECT id, group_letter, home_team_id, away_team_id,
                   TO_CHAR(match_date, 'YYYY-MM-DD') AS match_date,
-                  actual_result, home_score, away_score, status
+                  actual_result, home_score, away_score, status, kickoff_at
            FROM pool.matches ORDER BY id`
         );
         res.json({ teams: teams.rows, matches: matches.rows });

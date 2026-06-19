@@ -170,17 +170,17 @@ export function AllPicksPage({ me }: { me: Me }) {
               Green = correct (result is in).
             </p>
             <p className="text-[10px] text-muted-foreground sm:hidden mb-1">Swipe sideways to see more →</p>
-            <div className="overflow-x-auto">
+            <div className="max-h-[70vh] overflow-auto">
               <table className="text-xs min-w-full">
                 <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="py-1.5 pr-2 whitespace-nowrap">Match</th>
-                    <th className="py-1.5 pr-2">Res</th>
+                  <tr className="text-left text-muted-foreground">
+                    <th className="sticky top-0 z-20 bg-card border-b py-1.5 pr-2 whitespace-nowrap">Match</th>
+                    <th className="sticky top-0 z-20 bg-card border-b py-1.5 pr-2">Res</th>
                     {shownPlayers.map((p) => (
                       <th
                         key={p.email}
                         title={p.display_name}
-                        className="py-1.5 px-1.5 text-center max-w-[68px] truncate"
+                        className="sticky top-0 z-20 bg-card border-b py-1.5 px-1.5 text-center max-w-[68px] truncate"
                       >
                         {p.display_name}
                       </th>
@@ -237,17 +237,17 @@ export function AllPicksPage({ me }: { me: Me }) {
               until a team&apos;s fate is decided.
             </p>
             <p className="text-[10px] text-muted-foreground sm:hidden mb-1">Swipe sideways to see more →</p>
-            <div className="overflow-x-auto">
+            <div className="max-h-[70vh] overflow-auto">
               <table className="text-xs min-w-full">
                 <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="py-1.5 pr-2">Team</th>
-                    <th className="py-1.5 pr-2">Reached</th>
+                  <tr className="text-left text-muted-foreground">
+                    <th className="sticky top-0 z-20 bg-card border-b py-1.5 pr-2">Team</th>
+                    <th className="sticky top-0 z-20 bg-card border-b py-1.5 pr-2">Reached</th>
                     {shownPlayers.map((p) => (
                       <th
                         key={p.email}
                         title={p.display_name}
-                        className="py-1.5 px-1.5 text-center max-w-[68px] truncate"
+                        className="sticky top-0 z-20 bg-card border-b py-1.5 px-1.5 text-center max-w-[68px] truncate"
                       >
                         {p.display_name}
                       </th>

@@ -26,6 +26,7 @@ export interface Match {
   home_score: number | null;
   away_score: number | null;
   status: 'pre' | 'in' | 'post' | null;
+  kickoff_at: string | null; // ISO kickoff datetime from ESPN
 }
 
 export interface Fixtures {

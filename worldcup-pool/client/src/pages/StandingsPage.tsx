@@ -37,12 +37,27 @@ export function StandingsPage({ me }: { me: Me }) {
   }
 
   const champion = fixtures?.teams.find((t) => t.actual_stage === 6) ?? null;
-  // Biggest climber since the last daily snapshot.
-  const mover =
-    rows
-      ?.map((r, i) => ({ name: r.display_name, up: r.prev_rank !== null ? r.prev_rank - (i + 1) : 0 }))
-      .filter((m) => m.up > 0)
-      .sort((a, b) => b.up - a.up)[0] ?? null;
+  // Standard competition ranking (1, 2, 2, 4): tied totals share a rank.
+  // Matches the SQL RANK() used for prev_rank, so movement deltas line up.
+  const ranks: number[] = [];
+  {
+    let rank = 0;
+    let prevPts: number | null = null;
+    (rows ?? []).forEach((r, i) => {
+      if (r.total_points !== prevPts) {
+        rank = i + 1;
+        prevPts = r.total_points;
+      }
+      ranks.push(rank);
+    });
+  }
+  // Biggest climber(s) since the last daily snapshot — everyone tied for the
+  // largest jump up.
+  const climbers = (rows ?? [])
+    .map((r, i) => ({ name: r.display_name, up: r.prev_rank !== null ? r.prev_rank - ranks[i] : 0 }))
+    .filter((m) => m.up > 0);
+  const topUp = climbers.reduce((mx, m) => Math.max(mx, m.up), 0);
+  const movers = climbers.filter((m) => m.up === topUp);
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
@@ -62,10 +77,11 @@ export function StandingsPage({ me }: { me: Me }) {
                 Max = points still reachable given eliminated teams and remaining matches. Click a row for the
                 breakdown.
               </p>
-              {mover && (
+              {movers.length > 0 && (
                 <p className="text-xs mb-2">
-                  📈 Biggest mover: <strong>{mover.name}</strong> <span className="text-green-600">▲{mover.up}</span>{' '}
-                  since yesterday
+                  📈 {movers.length > 1 ? 'Biggest movers' : 'Biggest mover'}:{' '}
+                  <strong>{movers.map((m) => m.name).join(', ')}</strong>{' '}
+                  <span className="text-green-600">▲{topUp}</span> since yesterday
                 </p>
               )}
               <table className="w-full text-sm">
@@ -96,8 +112,8 @@ export function StandingsPage({ me }: { me: Me }) {
                         onClick={() => setExpanded(expanded === r.email ? null : r.email)}
                       >
                         <td className="py-2 pr-2 whitespace-nowrap">
-                          {i + 1}
-                          <Movement prevRank={r.prev_rank} rank={i + 1} />
+                          {ranks[i]}
+                          <Movement prevRank={r.prev_rank} rank={ranks[i]} />
                         </td>
                         <td className="py-2 pr-2">
                           {expanded === r.email ? '▾ ' : '▸ '}

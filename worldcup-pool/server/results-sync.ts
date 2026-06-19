@@ -86,6 +86,7 @@ export interface EspnEvent {
   awayScore: number;
   completed: boolean;
   state: 'pre' | 'in' | 'post'; // ESPN status: scheduled / live / final
+  kickoff: string | null; // ISO kickoff datetime (ESPN events[].date)
   winnerId: number | null; // ESPN's winner flag (accounts for penalties)
   round: Round | null;
 }
@@ -120,6 +121,7 @@ interface EspnCompetition {
 interface EspnGameEvent {
   name?: string;
   shortName?: string;
+  date?: string;
   competitions?: EspnCompetition[];
 }
 export interface EspnScoreboard {
@@ -154,6 +156,7 @@ export function parseEspnDay(json: EspnScoreboard): EspnEvent[] {
       awayScore: Number.isNaN(awayScore) ? 0 : awayScore,
       completed: comp.status?.type?.completed === true,
       state,
+      kickoff: ev.date ?? null,
       winnerId,
       round: parseRound(labelText, homeId, awayId),
     });
@@ -334,8 +337,8 @@ export async function syncResults(appkit: AppKitLakebase, opts: { allDates?: boo
       const ourAway = e.homeId === gm.homeId ? e.awayScore : e.homeScore;
       const live = e.state !== 'pre';
       await appkit.lakebase.query(
-        `UPDATE pool.matches SET home_score = $2, away_score = $3, status = $4 WHERE id = $1`,
-        [gm.id, live ? ourHome : null, live ? ourAway : null, e.state]
+        `UPDATE pool.matches SET home_score = $2, away_score = $3, status = $4, kickoff_at = COALESCE($5, kickoff_at) WHERE id = $1`,
+        [gm.id, live ? ourHome : null, live ? ourAway : null, e.state, e.kickoff]
       );
       if (e.completed) {
         const result = groupResult(e, gm);
