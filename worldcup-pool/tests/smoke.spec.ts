@@ -19,13 +19,8 @@ test('smoke test - app loads with the Today page as the landing page', async ({ 
   await expect(page.getByRole('link', { name: 'My Picks' })).toBeVisible();
   await expect(page.getByRole('link', { name: "Everyone's Picks" })).toBeVisible();
 
-  // '/' renders the Today page: a matchday heading or the empty-state note.
-  await expect(
-    page
-      .getByText(/Matches/)
-      .first()
-      .or(page.getByText('No matches scheduled.'))
-  ).toBeVisible();
+  // '/' renders the Today page — the schedule link is always present.
+  await expect(page.getByRole('link', { name: /full schedule/i })).toBeVisible();
 });
 
 test('smoke test - standings page gated until lock or visible', async ({ page }) => {
