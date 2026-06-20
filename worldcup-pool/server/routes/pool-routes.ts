@@ -60,15 +60,39 @@ const STANDINGS_TOTALS_CTE = `
     FROM pool.bracket_predictions bp JOIN pool.teams t ON t.id = bp.team_id
     GROUP BY bp.email
   ),
+  -- Per resolved match: how many players predicted it, and how many got it
+  -- right. (n_pred - n_correct) is the "boldness" of a correct call there —
+  -- the number of opponents you beat on that match.
+  match_consensus AS (
+    SELECT mp.match_id,
+           COUNT(*) AS n_pred,
+           SUM(CASE WHEN mp.pick = m.actual_result THEN 1 ELSE 0 END) AS n_correct
+    FROM pool.match_predictions mp JOIN pool.matches m ON m.id = mp.match_id
+    WHERE m.actual_result IS NOT NULL
+    GROUP BY mp.match_id
+  ),
+  -- Contrarian-correctness tiebreaker: sum of boldness over a player's correct
+  -- picks. Rewards being right when the pool was wrong; chalk everyone nailed
+  -- is worth ~0.
+  contrarian AS (
+    SELECT mp.email, SUM(mc.n_pred - mc.n_correct)::int AS score
+    FROM pool.match_predictions mp
+    JOIN pool.matches m ON m.id = mp.match_id
+    JOIN match_consensus mc ON mc.match_id = mp.match_id
+    WHERE m.actual_result IS NOT NULL AND mp.pick = m.actual_result
+    GROUP BY mp.email
+  ),
   totals AS (
     SELECT p.email, p.display_name,
            COALESCE(g.pts, 0)::int AS group_points,
            COALESCE(b.pts, 0)::int AS bracket_points,
            (COALESCE(g.pts, 0) + COALESCE(b.pts, 0))::int AS total_points,
-           (COALESCE(g.max_pts, 0) + COALESCE(b.max_pts, 0))::int AS max_points
+           (COALESCE(g.max_pts, 0) + COALESCE(b.max_pts, 0))::int AS max_points,
+           COALESCE(c.score, 0)::int AS contrarian
     FROM pool.participants p
     LEFT JOIN group_pts g ON g.email = p.email
     LEFT JOIN bracket_pts b ON b.email = p.email
+    LEFT JOIN contrarian c ON c.email = p.email
   )`;
 
 const SETUP_SQL = `
@@ -211,6 +235,14 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
         PRIMARY KEY (snapshot_date, email)
       )
     `);
+    // Snapshot the tiebreaker fields too, so prev_rank ranks with the same
+    // cascade (total → bracket → contrarian) the live standings use.
+    await appkit.lakebase.query(
+      'ALTER TABLE pool.standings_snapshots ADD COLUMN IF NOT EXISTS bracket_points INT NOT NULL DEFAULT 0'
+    );
+    await appkit.lakebase.query(
+      'ALTER TABLE pool.standings_snapshots ADD COLUMN IF NOT EXISTS contrarian INT NOT NULL DEFAULT 0'
+    );
 
     const { rows } = await appkit.lakebase.query('SELECT COUNT(*)::int AS n FROM pool.teams');
     if ((rows[0] as { n: number }).n === 0) {
@@ -248,9 +280,12 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
       if (rows[0]?.locked === true) {
         await appkit.lakebase.query(`
           ${STANDINGS_TOTALS_CTE}
-          INSERT INTO pool.standings_snapshots (snapshot_date, email, total_points)
-          SELECT ${EASTERN_TODAY_SQL}, email, total_points FROM totals
-          ON CONFLICT (snapshot_date, email) DO UPDATE SET total_points = EXCLUDED.total_points
+          INSERT INTO pool.standings_snapshots (snapshot_date, email, total_points, bracket_points, contrarian)
+          SELECT ${EASTERN_TODAY_SQL}, email, total_points, bracket_points, contrarian FROM totals
+          ON CONFLICT (snapshot_date, email) DO UPDATE SET
+            total_points = EXCLUDED.total_points,
+            bracket_points = EXCLUDED.bracket_points,
+            contrarian = EXCLUDED.contrarian
         `);
       }
     } catch (e) {
@@ -426,17 +461,19 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
         const { rows } = await appkit.lakebase.query(`
           ${STANDINGS_TOTALS_CTE},
           prev AS (
-            SELECT email, RANK() OVER (ORDER BY total_points DESC) AS rk
+            SELECT email, RANK() OVER (
+              ORDER BY total_points DESC, bracket_points DESC, contrarian DESC
+            ) AS rk
             FROM pool.standings_snapshots
             WHERE snapshot_date = (
               SELECT MAX(snapshot_date) FROM pool.standings_snapshots WHERE snapshot_date < ${EASTERN_TODAY_SQL}
             )
           )
           SELECT s.email, s.display_name, s.group_points, s.bracket_points,
-                 s.total_points, s.max_points, prev.rk::int AS prev_rank
+                 s.total_points, s.max_points, s.contrarian, prev.rk::int AS prev_rank
           FROM totals s
           LEFT JOIN prev ON prev.email = s.email
-          ORDER BY s.total_points DESC, s.display_name
+          ORDER BY s.total_points DESC, s.bracket_points DESC, s.contrarian DESC, s.display_name
         `);
         res.json(rows);
       } catch (err) {

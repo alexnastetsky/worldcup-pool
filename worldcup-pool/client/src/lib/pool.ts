@@ -43,6 +43,7 @@ export interface StandingRow {
   bracket_points: number;
   total_points: number;
   max_points: number;
+  contrarian: number; // "bold calls" tiebreaker: correct picks weighted by how many others missed them
   prev_rank: number | null; // rank at the last daily snapshot, for movement arrows
 }
 

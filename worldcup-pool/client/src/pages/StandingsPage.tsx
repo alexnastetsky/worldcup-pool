@@ -37,16 +37,19 @@ export function StandingsPage({ me }: { me: Me }) {
   }
 
   const champion = fixtures?.teams.find((t) => t.actual_stage === 6) ?? null;
-  // Standard competition ranking (1, 2, 2, 4): tied totals share a rank.
-  // Matches the SQL RANK() used for prev_rank, so movement deltas line up.
+  // Standard competition ranking (1, 2, 2, 4). Rows arrive pre-sorted by the
+  // server cascade total → bracket → contrarian; only players identical on all
+  // three share a rank. Matches the SQL RANK() for prev_rank so deltas line up.
+  const rankKey = (r: StandingRow) => `${r.total_points}|${r.bracket_points}|${r.contrarian}`;
   const ranks: number[] = [];
   {
     let rank = 0;
-    let prevPts: number | null = null;
+    let prevKey: string | null = null;
     (rows ?? []).forEach((r, i) => {
-      if (r.total_points !== prevPts) {
+      const key = rankKey(r);
+      if (key !== prevKey) {
         rank = i + 1;
-        prevPts = r.total_points;
+        prevKey = key;
       }
       ranks.push(rank);
     });
@@ -76,6 +79,11 @@ export function StandingsPage({ me }: { me: Me }) {
               <p className="text-xs text-muted-foreground mb-2">
                 Max = points still reachable given eliminated teams and remaining matches. Click a row for the
                 breakdown.
+                <span className="hidden sm:inline">
+                  {' '}
+                  🎯 = bold calls (correct picks weighted by how many others missed them), used to break ties on equal
+                  points.
+                </span>
               </p>
               {movers.length > 0 && (
                 <p className="text-xs mb-2">
@@ -101,6 +109,12 @@ export function StandingsPage({ me }: { me: Me }) {
                       <span className="sm:hidden">Tot</span>
                       <span className="hidden sm:inline">Total</span>
                     </th>
+                    <th
+                      className="py-2 pr-2 text-right hidden sm:table-cell"
+                      title="Bold calls — correct picks weighted by how many others missed them. Breaks ties on equal points."
+                    >
+                      🎯
+                    </th>
                     <th className="py-2 text-right">Max</th>
                   </tr>
                 </thead>
@@ -122,11 +136,14 @@ export function StandingsPage({ me }: { me: Me }) {
                         <td className="py-2 pr-2 text-right">{r.group_points}</td>
                         <td className="py-2 pr-2 text-right">{r.bracket_points}</td>
                         <td className="py-2 pr-2 text-right font-medium">{r.total_points}</td>
+                        <td className="py-2 pr-2 text-right text-muted-foreground tabular-nums hidden sm:table-cell">
+                          {r.contrarian}
+                        </td>
                         <td className="py-2 text-right text-muted-foreground">{r.max_points}</td>
                       </tr>
                       {expanded === r.email && fixtures && allPicks && (
                         <tr className="border-b bg-muted/30">
-                          <td colSpan={6} className="p-3">
+                          <td colSpan={7} className="p-3">
                             <Breakdown email={r.email} fixtures={fixtures} allPicks={allPicks} />
                           </td>
                         </tr>
