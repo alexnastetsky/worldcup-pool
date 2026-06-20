@@ -77,13 +77,9 @@ export function StandingsPage({ me }: { me: Me }) {
           {rows && rows.length > 0 && (
             <>
               <p className="text-xs text-muted-foreground mb-2">
-                Max = points still reachable given eliminated teams and remaining matches. Click a row for the
+                Max = points still reachable given eliminated teams and remaining matches. 🎯 = bold calls (correct
+                picks weighted by how many others missed them), used to break ties on equal points. Click a row for the
                 breakdown.
-                <span className="hidden sm:inline">
-                  {' '}
-                  🎯 = bold calls (correct picks weighted by how many others missed them), used to break ties on equal
-                  points.
-                </span>
               </p>
               {movers.length > 0 && (
                 <p className="text-xs mb-2">
@@ -110,7 +106,7 @@ export function StandingsPage({ me }: { me: Me }) {
                       <span className="hidden sm:inline">Total</span>
                     </th>
                     <th
-                      className="py-2 pr-2 text-right hidden sm:table-cell"
+                      className="py-2 pr-2 text-right"
                       title="Bold calls — correct picks weighted by how many others missed them. Breaks ties on equal points."
                     >
                       🎯
@@ -136,9 +132,7 @@ export function StandingsPage({ me }: { me: Me }) {
                         <td className="py-2 pr-2 text-right">{r.group_points}</td>
                         <td className="py-2 pr-2 text-right">{r.bracket_points}</td>
                         <td className="py-2 pr-2 text-right font-medium">{r.total_points}</td>
-                        <td className="py-2 pr-2 text-right text-muted-foreground tabular-nums hidden sm:table-cell">
-                          {r.contrarian}
-                        </td>
+                        <td className="py-2 pr-2 text-right text-muted-foreground tabular-nums">{r.contrarian}</td>
                         <td className="py-2 text-right text-muted-foreground">{r.max_points}</td>
                       </tr>
                       {expanded === r.email && fixtures && allPicks && (
