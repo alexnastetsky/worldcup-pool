@@ -198,21 +198,16 @@ export function TodayPage({ me }: { me: Me }) {
     const score = k.home_score !== null && k.away_score !== null ? `${k.home_score}–${k.away_score}` : null;
     const kickoff = kickoffTime(k.kickoff_at);
 
-    // Each participant's "pick": the team they predicted to advance further.
-    // Equal predicted stages = no clear favorite, so that player is omitted.
+    // Each side's callers are the players who predicted that team to advance
+    // past this round (predicted stage > round). A player who rated both teams
+    // highly shows under both; equal-depth predictions are no longer hidden.
     const homeId = k.home_id;
     const awayId = k.away_id;
-    const roundNum = Number(k.round); // NaN for the third-place game
-    const advancePick = (email: string): { code: string; teamId: number } | null => {
-      if (homeId === null || awayId === null) return null;
-      const hs = bracketPickMap.get(`${email}|${homeId}`) ?? 0;
-      const as = bracketPickMap.get(`${email}|${awayId}`) ?? 0;
-      if (hs === as) return null;
-      return hs > as ? { code: home.short, teamId: homeId } : { code: away.short, teamId: awayId };
-    };
-    // The picked team is correct once it has advanced past this round.
-    const pickedCorrect = (teamId: number) => {
-      if (Number.isNaN(roundNum)) return false;
+    const roundNum = Number(k.round); // NaN for the third-place game (no "advance")
+    const advancers = (teamId: number) =>
+      allPicks ? allPicks.participants.filter((p) => (bracketPickMap.get(`${p.email}|${teamId}`) ?? 0) > roundNum) : [];
+    // Once the team has actually advanced past this round, those calls are correct.
+    const teamAdvanced = (teamId: number) => {
       const st = teamById.get(teamId)?.actual_stage;
       return st != null && st > roundNum;
     };
@@ -246,22 +241,33 @@ export function TodayPage({ me }: { me: Me }) {
             </span>
           )}
         </div>
-        {allPicks && homeId !== null && awayId !== null && (
-          <div className="flex flex-wrap sm:grid sm:grid-cols-4 gap-1 mt-1 pl-6">
-            {allPicks.participants.map((p) => {
-              const pick = advancePick(p.email);
-              if (pick === null) return null;
-              const correct = pickedCorrect(pick.teamId);
+        {allPicks && homeId !== null && awayId !== null && !Number.isNaN(roundNum) && (
+          <div className="mt-1 pl-6 space-y-0.5">
+            {[
+              { teamId: homeId, code: home.short },
+              { teamId: awayId, code: away.short },
+            ].map(({ teamId, code }) => {
+              const who = advancers(teamId);
+              const advanced = teamAdvanced(teamId);
               return (
-                <span
-                  key={p.email}
-                  title={`${p.display_name}: ${pick.code} to advance`}
-                  className={`text-[10px] px-1.5 py-0.5 rounded border sm:min-w-0 sm:truncate ${
-                    correct ? 'bg-green-100 dark:bg-green-900 border-green-300' : 'text-muted-foreground'
-                  }`}
-                >
-                  {p.display_name}: {pick.code}
-                </span>
+                <div key={teamId} className="flex flex-wrap items-baseline gap-1">
+                  <span className="text-[10px] font-medium text-muted-foreground w-9 shrink-0">{code}</span>
+                  {who.length === 0 ? (
+                    <span className="text-[10px] text-muted-foreground italic">no one</span>
+                  ) : (
+                    who.map((p) => (
+                      <span
+                        key={p.email}
+                        title={`${p.display_name}: predicted ${code} to advance`}
+                        className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                          advanced ? 'bg-green-100 dark:bg-green-900 border-green-300' : 'text-muted-foreground'
+                        }`}
+                      >
+                        {p.display_name}
+                      </span>
+                    ))
+                  )}
+                </div>
               );
             })}
           </div>
