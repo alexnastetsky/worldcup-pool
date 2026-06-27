@@ -29,9 +29,37 @@ export interface Match {
   kickoff_at: string | null; // ISO kickoff datetime from ESPN
 }
 
+// A knockout (or third-place) fixture mirrored from ESPN — display only, never
+// picked. home_id/away_id resolve from null once the slot's team is decided;
+// home_name/away_name carry the ESPN label (real team or placeholder slot).
+export interface KnockoutMatch {
+  espn_id: string;
+  round: string; // '1'..'5' (R32..Final) or 'third'
+  match_date: string;
+  kickoff_at: string | null;
+  home_name: string;
+  away_name: string;
+  home_id: number | null;
+  away_id: number | null;
+  home_score: number | null;
+  away_score: number | null;
+  status: 'pre' | 'in' | 'post' | null;
+}
+
+// Human label for a KnockoutMatch.round value.
+export const ROUND_LABELS: Record<string, string> = {
+  '1': 'Round of 32',
+  '2': 'Round of 16',
+  '3': 'Quarterfinal',
+  '4': 'Semifinal',
+  '5': 'Final',
+  third: 'Third-place',
+};
+
 export interface Fixtures {
   teams: Team[];
   matches: Match[];
+  knockout: KnockoutMatch[];
 }
 
 export type Pick = 'H' | 'A' | 'D';

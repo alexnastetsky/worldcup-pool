@@ -78,6 +78,7 @@ for (const m of SEED_MATCHES) {
 // --- ESPN parsing -------------------------------------------------------------
 
 export interface EspnEvent {
+  espnId: string | null; // ESPN's stable event id (knockout mirror primary key)
   homeName: string;
   awayName: string;
   homeId: number | null;
@@ -91,11 +92,7 @@ export interface EspnEvent {
   round: Round | null;
 }
 
-function parseRound(text: string, homeId: number | null, awayId: number | null): Round | null {
-  // A known group pair is always a group game, whatever the label says.
-  if (homeId !== null && awayId !== null && groupMatchByPair.has(pairKey(homeId, awayId))) {
-    return 'group';
-  }
+function roundFromText(text: string): Round | null {
   const t = text.toLowerCase();
   if (/third place|3rd place/.test(t)) return 'third';
   if (/round of 32|\br32\b/.test(t)) return 1;
@@ -104,6 +101,19 @@ function parseRound(text: string, homeId: number | null, awayId: number | null):
   if (/semi-?final/.test(t)) return 4;
   if (/\bfinal\b/.test(t)) return 5;
   return null;
+}
+
+// The notes headline ("FIFA World Cup, Round of 16") is ESPN's authoritative
+// round label and is checked first: an unresolved knockout fixture's name and
+// shortName describe its *feeder* matches (placeholder side "Round of 32 1
+// Winner", shortName "RD32 @ RD32"), which would otherwise misclassify a later
+// round as an earlier one. The name/shortName are only a fallback.
+function parseRound(notesText: string, nameText: string, homeId: number | null, awayId: number | null): Round | null {
+  // A known group pair is always a group game, whatever the label says.
+  if (homeId !== null && awayId !== null && groupMatchByPair.has(pairKey(homeId, awayId))) {
+    return 'group';
+  }
+  return roundFromText(notesText) ?? roundFromText(nameText);
 }
 
 // Narrow shape of the bits of the ESPN scoreboard payload we read.
@@ -119,6 +129,7 @@ interface EspnCompetition {
   competitors?: EspnCompetitor[];
 }
 interface EspnGameEvent {
+  id?: string;
   name?: string;
   shortName?: string;
   date?: string;
@@ -141,13 +152,14 @@ export function parseEspnDay(json: EspnScoreboard): EspnEvent[] {
     const homeId = teamIdFromName(homeName);
     const awayId = teamIdFromName(awayName);
     const notesText = (comp.notes ?? []).map((n) => n.headline ?? '').join(' ');
-    const labelText = [ev.name, ev.shortName, notesText].filter(Boolean).join(' ');
+    const nameText = [ev.name, ev.shortName].filter(Boolean).join(' ');
     const homeScore = parseInt(String(home.score ?? ''), 10);
     const awayScore = parseInt(String(away.score ?? ''), 10);
     const winnerId = home.winner ? homeId : away.winner ? awayId : null;
     const rawState = comp.status?.type?.state;
     const state: EspnEvent['state'] = rawState === 'in' || rawState === 'post' ? rawState : 'pre';
     events.push({
+      espnId: ev.id ?? null,
       homeName,
       awayName,
       homeId,
@@ -158,7 +170,7 @@ export function parseEspnDay(json: EspnScoreboard): EspnEvent[] {
       state,
       kickoff: ev.date ?? null,
       winnerId,
-      round: parseRound(labelText, homeId, awayId),
+      round: parseRound(notesText, nameText, homeId, awayId),
     });
   }
   return events;
@@ -280,6 +292,35 @@ export function knockoutEffect(event: EspnEvent): KnockoutEffect | null {
 const ymd = (d: Date) =>
   `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
 
+// Knockout round of a fixture from its US-Eastern calendar date. ESPN labels
+// undecided knockout fixtures by their *feeders* ("Quarterfinal 3 Winner",
+// "Semifinal 1 Loser") and often omits the notes round label entirely, so text
+// is unreliable — but FIFA's round dates are fixed (source: official 2026 World
+// Cup schedule). Returns '1'..'5' (R32..Final), 'third', or null off-schedule.
+export function knockoutRoundForDate(ed: string): string | null {
+  if (ed >= '2026-06-28' && ed <= '2026-07-03') return '1'; // Round of 32
+  if (ed >= '2026-07-04' && ed <= '2026-07-07') return '2'; // Round of 16
+  if (ed >= '2026-07-09' && ed <= '2026-07-11') return '3'; // Quarterfinals
+  if (ed >= '2026-07-14' && ed <= '2026-07-15') return '4'; // Semifinals
+  if (ed === '2026-07-18') return 'third'; // Third-place match
+  if (ed === '2026-07-19') return '5'; // Final
+  return null;
+}
+
+// US-Eastern calendar date (YYYY-MM-DD) of an ISO instant. Knockout fixtures
+// bucket by Eastern day so they land in the same Today-page section the rest of
+// the app keys off (mirrors TodayPage.easternToday).
+export function easternDate(iso: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(iso));
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
 function tournamentDates(): string[] {
   const dates: string[] = [];
   const d = new Date(Date.UTC(2026, 5, 11)); // Jun 11
@@ -396,6 +437,43 @@ export async function syncResults(appkit: AppKitLakebase, opts: { allDates?: boo
           eff.loserId,
         ]);
       }
+    }
+
+    // (d) mirror knockout + third-place fixtures for display on the Today page.
+    // These are never picked (knockouts score via bracket_predictions), so they
+    // live in their own table and don't touch pool.matches or scoring. ESPN
+    // supplies resolved teams once known and placeholder slot names otherwise
+    // ("Round of 32 1 Winner"), which the upsert resolves over time. Round is
+    // derived from the (fixed) match date, not ESPN's unreliable round text.
+    for (const e of events) {
+      if (e.espnId === null || e.kickoff === null) continue;
+      const matchDate = easternDate(e.kickoff);
+      const round = knockoutRoundForDate(matchDate);
+      if (round === null) continue; // group date or rest day — not a knockout fixture
+      const live = e.state !== 'pre';
+      await appkit.lakebase.query(
+        `INSERT INTO pool.knockout_matches
+           (espn_id, round, match_date, kickoff_at, home_name, away_name, home_id, away_id, home_score, away_score, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         ON CONFLICT (espn_id) DO UPDATE SET
+           round = EXCLUDED.round, match_date = EXCLUDED.match_date, kickoff_at = EXCLUDED.kickoff_at,
+           home_name = EXCLUDED.home_name, away_name = EXCLUDED.away_name,
+           home_id = EXCLUDED.home_id, away_id = EXCLUDED.away_id,
+           home_score = EXCLUDED.home_score, away_score = EXCLUDED.away_score, status = EXCLUDED.status`,
+        [
+          e.espnId,
+          round,
+          matchDate,
+          e.kickoff,
+          e.homeName,
+          e.awayName,
+          e.homeId,
+          e.awayId,
+          live ? e.homeScore : null,
+          live ? e.awayScore : null,
+          e.state,
+        ]
+      );
     }
 
     const summary: SyncSummary = {

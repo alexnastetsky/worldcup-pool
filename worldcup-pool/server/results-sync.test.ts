@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { SEED_MATCHES } from './seed-data';
 import type { EspnEvent, Result } from './results-sync';
-import { computeQualifierIds, groupResult, knockoutEffect, parseEspnDay, teamIdFromName } from './results-sync';
+import {
+  computeQualifierIds,
+  easternDate,
+  groupResult,
+  knockoutEffect,
+  knockoutRoundForDate,
+  parseEspnDay,
+  teamIdFromName,
+} from './results-sync';
 
 // Minimal ESPN payload shaped like the real scoreboard response, for June 11:
 // Mexico 2–0 South Africa (Group A), South Korea 2–1 Czechia (Group A).
@@ -61,6 +69,61 @@ describe('parseEspnDay', () => {
     expect(e.completed).toBe(true);
     expect(e.winnerId).toBe(teamIdFromName('Mexico'));
     expect(e.round).toBe('group'); // recognized as a seed group pair
+    expect(e.espnId).toBeNull(); // fixture events carry no id
+  });
+
+  it('captures the ESPN event id and a knockout round with a placeholder side', () => {
+    const events = parseEspnDay({
+      events: [
+        {
+          id: '760502',
+          name: 'Round of 32 1 Winner vs Round of 32 3 Winner',
+          shortName: 'RD32 @ RD32',
+          date: '2026-07-04T19:00Z',
+          competitions: [
+            {
+              status: { type: { state: 'pre', completed: false } },
+              notes: [{ headline: 'FIFA World Cup, Round of 16' }],
+              competitors: [
+                { homeAway: 'home', score: '', team: { displayName: 'Round of 32 1 Winner' } },
+                { homeAway: 'away', score: '', team: { displayName: 'Round of 32 3 Winner' } },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0].espnId).toBe('760502');
+    expect(events[0].round).toBe(2); // Round of 16
+    expect(events[0].homeId).toBeNull(); // unresolved placeholder slot
+  });
+});
+
+describe('knockoutRoundForDate', () => {
+  it('maps fixed knockout dates to rounds and ignores placeholder feeder text', () => {
+    expect(knockoutRoundForDate('2026-06-28')).toBe('1'); // R32 start
+    expect(knockoutRoundForDate('2026-07-03')).toBe('1'); // R32 end
+    expect(knockoutRoundForDate('2026-07-04')).toBe('2'); // R16
+    expect(knockoutRoundForDate('2026-07-10')).toBe('3'); // QF
+    expect(knockoutRoundForDate('2026-07-15')).toBe('4'); // SF (ESPN labels these "Quarterfinal Winner")
+    expect(knockoutRoundForDate('2026-07-18')).toBe('third'); // 3rd place ("Semifinal Loser")
+    expect(knockoutRoundForDate('2026-07-19')).toBe('5'); // Final ("Semifinal Winner")
+  });
+
+  it('returns null for group-stage dates and knockout rest days', () => {
+    expect(knockoutRoundForDate('2026-06-27')).toBeNull(); // last group day
+    expect(knockoutRoundForDate('2026-07-08')).toBeNull(); // rest day before QFs
+    expect(knockoutRoundForDate('2026-07-13')).toBeNull(); // rest day before SFs
+  });
+});
+
+describe('easternDate', () => {
+  it('buckets a UTC kickoff to its US-Eastern calendar day', () => {
+    // 00:30 UTC on Jun 29 is still Jun 28 (8:30 PM EDT) in New York.
+    expect(easternDate('2026-06-29T00:30:00Z')).toBe('2026-06-28');
+    // 19:00 UTC on Jun 28 is 3:00 PM EDT, same day.
+    expect(easternDate('2026-06-28T19:00:00Z')).toBe('2026-06-28');
   });
 });
 
@@ -71,6 +134,7 @@ describe('groupResult orientation', () => {
   it('is H when our seed-home team wins, regardless of ESPN home/away', () => {
     // ESPN matches seed orientation here.
     const aligned: EspnEvent = {
+      espnId: null,
       homeName: 'Mexico',
       awayName: 'South Africa',
       homeId: mexId,
@@ -100,6 +164,7 @@ describe('groupResult orientation', () => {
 
   it('is D on equal scores', () => {
     const draw: EspnEvent = {
+      espnId: null,
       homeName: 'Mexico',
       awayName: 'South Africa',
       homeId: mexId,
@@ -134,6 +199,7 @@ describe('knockoutEffect', () => {
   const a = teamIdFromName('Mexico') as number;
   const b = teamIdFromName('Brazil') as number;
   const base: EspnEvent = {
+    espnId: '760502',
     homeName: 'Mexico',
     awayName: 'Brazil',
     homeId: a,

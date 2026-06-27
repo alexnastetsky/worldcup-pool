@@ -35,6 +35,7 @@ const fixtures: Fixtures = {
     status: null,
     kickoff_at: null,
   })),
+  knockout: [],
 };
 
 // All home wins: deterministic full pick set.

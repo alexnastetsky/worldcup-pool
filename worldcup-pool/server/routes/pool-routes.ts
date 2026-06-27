@@ -117,6 +117,23 @@ const SETUP_SQL = `
     actual_result CHAR(1) CHECK (actual_result IN ('H','A','D'))
   );
 
+  -- Display-only mirror of ESPN knockout/third-place fixtures (never picked;
+  -- knockouts are scored via bracket_predictions). Keyed by ESPN's event id so
+  -- placeholder slots resolve to real teams as the bracket fills in.
+  CREATE TABLE IF NOT EXISTS pool.knockout_matches (
+    espn_id    TEXT PRIMARY KEY,
+    round      TEXT NOT NULL,          -- '1'..'5' (R32..Final) or 'third'
+    match_date DATE NOT NULL,          -- US-Eastern calendar date of kickoff
+    kickoff_at TIMESTAMPTZ,
+    home_name  TEXT NOT NULL,          -- ESPN name: real team or placeholder slot
+    away_name  TEXT NOT NULL,
+    home_id    INT REFERENCES pool.teams(id),  -- NULL while placeholder
+    away_id    INT REFERENCES pool.teams(id),
+    home_score INT,
+    away_score INT,
+    status     TEXT                    -- 'pre' | 'in' | 'post'
+  );
+
   CREATE TABLE IF NOT EXISTS pool.participants (
     email TEXT PRIMARY KEY,
     display_name TEXT NOT NULL,
@@ -349,7 +366,13 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
                   actual_result, home_score, away_score, status, kickoff_at
            FROM pool.matches ORDER BY id`
         );
-        res.json({ teams: teams.rows, matches: matches.rows });
+        const knockout = await appkit.lakebase.query(
+          `SELECT espn_id, round, TO_CHAR(match_date, 'YYYY-MM-DD') AS match_date,
+                  kickoff_at, home_name, away_name, home_id, away_id,
+                  home_score, away_score, status
+           FROM pool.knockout_matches ORDER BY match_date, kickoff_at`
+        );
+        res.json({ teams: teams.rows, matches: matches.rows, knockout: knockout.rows });
       } catch (err) {
         handleError(res, 'Failed to load fixtures', err);
       }

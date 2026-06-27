@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, Skeleton } from '@databricks/appkit-ui/react';
-import type { Fixtures, Match, Me, Pick, Team } from '../lib/pool';
-import { fetchJson, formatLongDate, teamCode } from '../lib/pool';
+import type { Fixtures, KnockoutMatch, Match, Me, Pick, Team } from '../lib/pool';
+import { fetchJson, formatLongDate, ROUND_LABELS, teamCode } from '../lib/pool';
 
 interface AllPicksPayload {
   participants: { email: string; display_name: string }[];
@@ -42,8 +42,8 @@ function kickoffTime(iso: string | null): string | null {
 }
 
 // Today (Eastern), or the next/last matchday with games, as YYYY-MM-DD.
-function focusMatchDate(matches: Match[]): string | null {
-  const dates = [...new Set(matches.map((m) => m.match_date))].sort();
+function focusMatchDate(allDates: string[]): string | null {
+  const dates = [...new Set(allDates)].sort();
   if (dates.length === 0) return null;
   const today = easternToday();
   if (dates.includes(today)) return today;
@@ -54,6 +54,7 @@ interface DaySection {
   label: string | null; // 'Yesterday' | 'Today' | 'Tomorrow' | null (fallback)
   date: string;
   matches: Match[];
+  knockout: KnockoutMatch[];
 }
 
 export function TodayPage({ me }: { me: Me }) {
@@ -91,24 +92,34 @@ export function TodayPage({ me }: { me: Me }) {
   const today = easternToday();
 
   const matchesOn = (date: string) => fixtures.matches.filter((m) => m.match_date === date);
+  const knockoutOn = (date: string) => fixtures.knockout.filter((k) => k.match_date === date);
   let sections: DaySection[] = [
-    { label: 'Yesterday', date: shiftDate(today, -1), matches: [] },
-    { label: 'Today', date: today, matches: [] },
-    { label: 'Tomorrow', date: shiftDate(today, 1), matches: [] },
+    { label: 'Yesterday', date: shiftDate(today, -1) },
+    { label: 'Today', date: today },
+    { label: 'Tomorrow', date: shiftDate(today, 1) },
   ]
-    .map((s) => ({ ...s, matches: matchesOn(s.date) }))
-    .filter((s) => s.matches.length > 0);
+    .map((s) => ({ ...s, matches: matchesOn(s.date), knockout: knockoutOn(s.date) }))
+    .filter((s) => s.matches.length + s.knockout.length > 0);
 
   // Off-day window: fall back to the nearest matchday so the page isn't empty.
   if (sections.length === 0) {
-    const focus = focusMatchDate(fixtures.matches);
-    if (focus) sections = [{ label: null, date: focus, matches: matchesOn(focus) }];
+    const focus = focusMatchDate([
+      ...fixtures.matches.map((m) => m.match_date),
+      ...fixtures.knockout.map((k) => k.match_date),
+    ]);
+    if (focus) sections = [{ label: null, date: focus, matches: matchesOn(focus), knockout: knockoutOn(focus) }];
   }
 
   const pickMap = new Map<string, Pick>();
   allPicks?.matchPicks.forEach((p) => pickMap.set(`${p.email}|${p.match_id}`, p.pick));
   const pickLabel = (pick: Pick, m: Match) =>
     pick === 'D' ? 'draw' : teamCode(teamById.get(pick === 'H' ? m.home_team_id : m.away_team_id)?.name ?? '?');
+
+  // Knockout games aren't picked head-to-head; the relevant prediction is the
+  // bracket — how far each team was predicted to go. A participant's "pick" for
+  // a knockout matchup is whichever of the two teams they had advancing further.
+  const bracketPickMap = new Map<string, number>();
+  allPicks?.bracketPicks.forEach((p) => bracketPickMap.set(`${p.email}|${p.team_id}`, p.predicted_stage));
 
   const renderRow = (m: Match) => {
     const home = teamById.get(m.home_team_id)?.name ?? '?';
@@ -170,6 +181,95 @@ export function TodayPage({ me }: { me: Me }) {
     );
   };
 
+  // A knockout side: real team (resolve seed name → code) or placeholder slot.
+  const knockoutSide = (id: number | null, name: string) => {
+    if (id !== null) {
+      const tn = teamById.get(id)?.name ?? name;
+      return { short: teamCode(tn), full: tn };
+    }
+    return { short: name, full: name };
+  };
+
+  const renderKnockoutRow = (k: KnockoutMatch) => {
+    const home = knockoutSide(k.home_id, k.home_name);
+    const away = knockoutSide(k.away_id, k.away_name);
+    const live = k.status === 'in';
+    const final = k.status === 'post';
+    const score = k.home_score !== null && k.away_score !== null ? `${k.home_score}–${k.away_score}` : null;
+    const kickoff = kickoffTime(k.kickoff_at);
+
+    // Each participant's "pick": the team they predicted to advance further.
+    // Equal predicted stages = no clear favorite, so that player is omitted.
+    const homeId = k.home_id;
+    const awayId = k.away_id;
+    const roundNum = Number(k.round); // NaN for the third-place game
+    const advancePick = (email: string): { code: string; teamId: number } | null => {
+      if (homeId === null || awayId === null) return null;
+      const hs = bracketPickMap.get(`${email}|${homeId}`) ?? 0;
+      const as = bracketPickMap.get(`${email}|${awayId}`) ?? 0;
+      if (hs === as) return null;
+      return hs > as ? { code: home.short, teamId: homeId } : { code: away.short, teamId: awayId };
+    };
+    // The picked team is correct once it has advanced past this round.
+    const pickedCorrect = (teamId: number) => {
+      if (Number.isNaN(roundNum)) return false;
+      const st = teamById.get(teamId)?.actual_stage;
+      return st != null && st > roundNum;
+    };
+
+    return (
+      <div key={k.espn_id} className="border-b pb-2 last:border-0 last:pb-0">
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-[10px] text-muted-foreground shrink-0 whitespace-nowrap uppercase tracking-wide">
+            {ROUND_LABELS[k.round] ?? k.round}
+          </span>
+          <span className="flex-1 min-w-0 truncate">
+            <span className="sm:hidden">
+              {home.short} – {away.short}
+            </span>
+            <span className="hidden sm:inline">
+              {home.full} – {away.full}
+            </span>
+          </span>
+          {score && <span className="font-semibold tabular-nums">{score}</span>}
+          {live ? (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0 bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200">
+              LIVE
+            </span>
+          ) : final ? (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0 bg-muted text-muted-foreground">Final</span>
+          ) : kickoff ? (
+            <span className="text-xs text-muted-foreground tabular-nums shrink-0 whitespace-nowrap">{kickoff}</span>
+          ) : (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0 border text-muted-foreground">
+              Scheduled
+            </span>
+          )}
+        </div>
+        {allPicks && homeId !== null && awayId !== null && (
+          <div className="flex flex-wrap sm:grid sm:grid-cols-4 gap-1 mt-1 pl-6">
+            {allPicks.participants.map((p) => {
+              const pick = advancePick(p.email);
+              if (pick === null) return null;
+              const correct = pickedCorrect(pick.teamId);
+              return (
+                <span
+                  key={p.email}
+                  title={`${p.display_name}: ${pick.code} to advance`}
+                  className={`text-[10px] px-1.5 py-0.5 rounded border sm:min-w-0 sm:truncate ${
+                    correct ? 'bg-green-100 dark:bg-green-900 border-green-300' : 'text-muted-foreground'
+                  }`}
+                >
+                  {p.display_name}: {pick.code}
+                </span>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="max-w-2xl mx-auto space-y-4">
       <div className="flex justify-end">
@@ -202,7 +302,10 @@ export function TodayPage({ me }: { me: Me }) {
                   {formatLongDate(s.date)}
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3">{s.matches.map(renderRow)}</CardContent>
+              <CardContent className="space-y-3">
+                {s.matches.map(renderRow)}
+                {s.knockout.map(renderKnockoutRow)}
+              </CardContent>
             </Card>
           </div>
         );
