@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, Skeleton } from '@databricks/appkit-ui/react';
 import type { Fixtures, Me, Pick, Team } from '../lib/pool';
-import { STAGE_SHORT, fetchJson, teamCode } from '../lib/pool';
+import { STAGE_NAMES, STAGE_SHORT, fetchJson, teamCode } from '../lib/pool';
 import {
   bracketProgress,
   buildBracket,
@@ -99,6 +99,20 @@ export function AllPicksPage({ me }: { me: Me }) {
   const pickShort = (pick: Pick, m: { home_team_id: number; away_team_id: number }) =>
     pick === 'D' ? 'draw' : teamCode(pickFull(pick, m));
 
+  // For a knockout stage s (1=R32 … 6=Champion): the teams that actually
+  // reached it, each with the shown players who predicted them that far or
+  // deeper (cumulative, matching bracket scoring). Most-called teams first.
+  const callersForStage = (s: number) =>
+    fixtures.teams
+      .filter((t) => t.actual_stage != null && t.actual_stage >= s)
+      .map((t) => ({
+        team: t,
+        callers: shownPlayers.filter((p) => (bracketPickMap.get(`${p.email}|${t.id}`) ?? 0) >= s),
+      }))
+      .sort((a, b) => b.callers.length - a.callers.length || a.team.name.localeCompare(b.team.name));
+  // Stages with at least one team there yet, deepest first.
+  const reachedStages = [6, 5, 4, 3, 2, 1].filter((s) => callersForStage(s).length > 0);
+
   return (
     <div className="space-y-6">
       <Toc
@@ -106,6 +120,7 @@ export function AllPicksPage({ me }: { me: Me }) {
           { id: 'players-picker', label: 'Players' },
           { id: 'match-picks', label: 'Match Picks' },
           { id: 'bracket-picks', label: 'Bracket Picks' },
+          { id: 'stage-callers', label: 'Who Called It' },
           { id: 'real-bracket', label: 'Tournament Bracket' },
         ]}
       />
@@ -278,6 +293,61 @@ export function AllPicksPage({ me }: { me: Me }) {
                 </tbody>
               </table>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card id="stage-callers" className="scroll-mt-14">
+          <CardHeader>
+            <CardTitle>Who Called It</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-muted-foreground mb-3">
+              For each knockout stage, the teams that reached it and who predicted them that far (or deeper).
+            </p>
+            {reachedStages.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Appears once teams start reaching the knockout rounds.</p>
+            ) : (
+              <div className="space-y-5">
+                {reachedStages.map((s) => (
+                  <div key={s}>
+                    <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                      {STAGE_NAMES[s]}
+                      <span className="text-[10px] font-normal text-muted-foreground border rounded px-1 py-0.5">
+                        {STAGE_SHORT[s]}
+                      </span>
+                    </h3>
+                    <div className="space-y-1.5">
+                      {callersForStage(s).map(({ team, callers }) => (
+                        <div key={team.id} className="flex flex-wrap items-baseline gap-x-2 gap-y-1 border-b pb-1.5 last:border-0">
+                          <span className="text-sm font-medium whitespace-nowrap">
+                            <span className="text-muted-foreground mr-1">{team.group_letter}</span>
+                            <span className="sm:hidden">{teamCode(team.name)}</span>
+                            <span className="hidden sm:inline">{team.name}</span>
+                          </span>
+                          <span className="text-[10px] text-muted-foreground tabular-nums">
+                            {callers.length}/{shownPlayers.length}
+                          </span>
+                          <span className="flex flex-wrap gap-1">
+                            {callers.length === 0 ? (
+                              <span className="text-[10px] text-muted-foreground italic">no one</span>
+                            ) : (
+                              callers.map((p) => (
+                                <span
+                                  key={p.email}
+                                  className="text-[10px] px-1.5 py-0.5 rounded border bg-green-100 dark:bg-green-900 border-green-300"
+                                >
+                                  {p.display_name}
+                                </span>
+                              ))
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
