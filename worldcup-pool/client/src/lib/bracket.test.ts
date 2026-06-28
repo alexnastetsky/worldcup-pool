@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Fixtures, Pick, Team } from './pool';
 import { SEED_TEAMS, SEED_MATCHES } from '../../../server/seed-data';
+import type { KnockoutMatch } from './pool';
 import {
   R32_SLOTS,
   ROUND_ORDER,
+  actualBracket,
+  actualGroupStandings,
   buildBracket,
   bracketProgress,
   computeGroupStandings,
@@ -186,5 +189,103 @@ describe('bracket round-trip', () => {
   it('ROUND_ORDER covers every node exactly once per round', () => {
     expect(ROUND_ORDER.map((r) => r.length)).toEqual([16, 8, 4, 2, 1]);
     expect(new Set(ROUND_ORDER.flat()).size).toBe(31);
+  });
+});
+
+describe('actualGroupStandings', () => {
+  it('ranks by goal difference, not head-to-head (unlike the pick-based path)', () => {
+    // Group A results: MEX & CZE both 6 pts; KOR & RSA both 3 pts.
+    // CZE beat MEX head-to-head, but MEX has the better goal difference (+3 vs 0),
+    // so real standings put MEX first — where the pick-based path puts CZE first.
+    const scores: Record<number, [number, number]> = {
+      1: [3, 0], // MEX 3-0 RSA
+      28: [1, 0], // MEX 1-0 KOR
+      53: [1, 0], // CZE 1-0 MEX
+      2: [2, 0], // KOR 2-0 CZE
+      25: [1, 0], // CZE 1-0 RSA
+      54: [1, 0], // RSA 1-0 KOR
+    };
+    const fx: Fixtures = {
+      ...fixtures,
+      matches: fixtures.matches.map((m) =>
+        scores[m.id]
+          ? { ...m, home_score: scores[m.id][0], away_score: scores[m.id][1], status: 'post' as const }
+          : m
+      ),
+    };
+    const rowsA = actualGroupStandings(fx).A;
+    expect(rowsA.map((r) => r.teamId)).toEqual([1, 4, 3, 2]); // MEX, CZE, KOR, RSA
+    expect(rowsA[0].gd).toBe(3);
+    // Same results via the pick-based path rank CZE first on head-to-head.
+    const picks: Record<number, Pick> = { ...allHomePicks };
+    expect(computeGroupStandings(picks, fx).A?.[0].teamId).toBe(4); // CZE
+  });
+});
+
+describe('actualBracket', () => {
+  // Deterministic full tournament: in every group match the lower team id wins
+  // 1-0, so standings order strictly by id (W = lowest, RU = 2nd, …).
+  const scoredMatches = fixtures.matches.map((m) => {
+    const homeWins = m.home_team_id < m.away_team_id;
+    return {
+      ...m,
+      home_score: homeWins ? 1 : 0,
+      away_score: homeWins ? 0 : 1,
+      actual_result: (homeWins ? 'H' : 'A') as Pick,
+      status: 'post' as const,
+    };
+  });
+  const fxScored: Fixtures = { ...fixtures, matches: scoredMatches };
+  // The official R32 seeding for this scenario, via the trusted qualifier path.
+  const picks: Record<number, Pick> = Object.fromEntries(
+    scoredMatches.map((m) => [m.id, (m.home_team_id < m.away_team_id ? 'H' : 'A') as Pick])
+  );
+  const q = computeQualifiers(computeGroupStandings(picks, fxScored));
+  if (!q) throw new Error('qualifiers expected');
+  const seededR32 = buildBracket(q, {}).filter((n) => n.round === 1);
+  const knockout: KnockoutMatch[] = seededR32.map((n) => ({
+    espn_id: String(n.matchNo),
+    round: '1',
+    match_date: '2026-06-28',
+    kickoff_at: null,
+    home_name: '',
+    away_name: '',
+    home_id: n.home,
+    away_id: n.away,
+    home_score: null,
+    away_score: null,
+    status: 'pre',
+  }));
+  const fxKO: Fixtures = { ...fxScored, knockout };
+
+  it('seeds the R32 from the actual matchups, matching the official slots', () => {
+    const nodes = actualBracket(fxKO);
+    expect(nodes).not.toBeNull();
+    expect(nodes).toHaveLength(31);
+    const r32 = (nodes ?? []).filter((n) => n.round === 1);
+    const got = new Map(r32.map((n) => [n.matchNo, [n.home, n.away]]));
+    for (const n of seededR32) {
+      expect(got.get(n.matchNo)).toEqual([n.home, n.away]);
+    }
+  });
+
+  it('returns null until all 16 R32 matchups are resolved', () => {
+    expect(actualBracket({ ...fxScored, knockout: knockout.slice(0, 15) })).toBeNull();
+    const withPlaceholder = [{ ...knockout[0], home_id: null }, ...knockout.slice(1)];
+    expect(actualBracket({ ...fxScored, knockout: withPlaceholder })).toBeNull();
+  });
+
+  it('fills a winner from actual_stage and feeds it into the next round', () => {
+    const node73 = seededR32.find((n) => n.matchNo === 73);
+    if (!node73 || node73.home === null) throw new Error('node 73 expected');
+    const advancer = node73.home;
+    const fxAdv: Fixtures = {
+      ...fxKO,
+      teams: fixtures.teams.map((t) => (t.id === advancer ? { ...t, actual_stage: 2 } : t)),
+    };
+    const nodes = actualBracket(fxAdv) ?? [];
+    expect(nodes.find((n) => n.matchNo === 73)?.winner).toBe(advancer);
+    // FEEDS[90] = [73, 75]; the R16 node fed by match 73 gets the advancer as home.
+    expect(nodes.find((n) => n.matchNo === 90)?.home).toBe(advancer);
   });
 });

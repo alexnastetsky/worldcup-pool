@@ -326,3 +326,149 @@ export function stagesFromBracket(
 export function bracketProgress(nodes: BracketNode[]): { decided: number; total: number } {
   return { decided: nodes.filter((n) => n.winner !== null).length, total: nodes.length };
 }
+
+// --- real (actual-results) bracket ------------------------------------------
+// The "Tournament Bracket (real results)" must mirror the official bracket, so
+// it is built from authoritative data — the ESPN knockout matchups
+// (fixtures.knockout) and recorded scores — NOT reconstructed from the pool's
+// simplified, goal-difference-free group tiebreakers (which mis-seed the R32).
+
+export interface ActualStandingRow {
+  teamId: number;
+  pts: number;
+  gd: number; // goal difference
+  gf: number; // goals for
+}
+
+// Real group standings from recorded results + scores: points (3/1/0) →
+// goal difference → goals for → two-way head-to-head → seeding (team id).
+// Unlike computeGroupStandings (pick-based, no scores) this has real goals.
+export function actualGroupStandings(fixtures: Fixtures): Record<string, ActualStandingRow[]> {
+  const result: Record<string, ActualStandingRow[]> = {};
+  for (const g of GROUP_LETTERS) {
+    const teams = fixtures.teams.filter((t) => t.group_letter === g);
+    const matches = fixtures.matches.filter(
+      (m) => m.group_letter === g && m.home_score !== null && m.away_score !== null
+    );
+    const pts = new Map<number, number>(teams.map((t) => [t.id, 0]));
+    const gf = new Map<number, number>(teams.map((t) => [t.id, 0]));
+    const ga = new Map<number, number>(teams.map((t) => [t.id, 0]));
+    for (const m of matches) {
+      const hs = m.home_score as number;
+      const as = m.away_score as number;
+      gf.set(m.home_team_id, (gf.get(m.home_team_id) ?? 0) + hs);
+      ga.set(m.home_team_id, (ga.get(m.home_team_id) ?? 0) + as);
+      gf.set(m.away_team_id, (gf.get(m.away_team_id) ?? 0) + as);
+      ga.set(m.away_team_id, (ga.get(m.away_team_id) ?? 0) + hs);
+      if (hs > as) pts.set(m.home_team_id, (pts.get(m.home_team_id) ?? 0) + 3);
+      else if (hs < as) pts.set(m.away_team_id, (pts.get(m.away_team_id) ?? 0) + 3);
+      else {
+        pts.set(m.home_team_id, (pts.get(m.home_team_id) ?? 0) + 1);
+        pts.set(m.away_team_id, (pts.get(m.away_team_id) ?? 0) + 1);
+      }
+    }
+    const rows: ActualStandingRow[] = teams.map((t) => ({
+      teamId: t.id,
+      pts: pts.get(t.id) ?? 0,
+      gd: (gf.get(t.id) ?? 0) - (ga.get(t.id) ?? 0),
+      gf: gf.get(t.id) ?? 0,
+    }));
+    rows.sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || a.teamId - b.teamId);
+    // Two-way head-to-head among teams otherwise dead-even.
+    for (let i = 0; i + 1 < rows.length; i++) {
+      const a = rows[i];
+      const b = rows[i + 1];
+      if (a.pts !== b.pts || a.gd !== b.gd || a.gf !== b.gf) continue;
+      const m = matches.find(
+        (x) =>
+          (x.home_team_id === a.teamId && x.away_team_id === b.teamId) ||
+          (x.home_team_id === b.teamId && x.away_team_id === a.teamId)
+      );
+      if (!m) continue;
+      const aScore = m.home_team_id === a.teamId ? (m.home_score as number) : (m.away_score as number);
+      const bScore = m.home_team_id === b.teamId ? (m.home_score as number) : (m.away_score as number);
+      if (bScore > aScore) [rows[i], rows[i + 1]] = [rows[i + 1], rows[i]];
+    }
+    result[g] = rows;
+  }
+  return result;
+}
+
+// The real bracket: R32 seeded from the actual ESPN matchups, winners filled in
+// from each team's recorded furthest stage. Returns null (card shows its empty
+// state) until the Round of 32 is fully drawn, or if the data can't be mapped
+// cleanly onto the 16 slots — never a wrong bracket.
+export function actualBracket(fixtures: Fixtures): BracketNode[] | null {
+  const r32Games = fixtures.knockout.filter((k) => k.round === '1' && k.home_id != null && k.away_id != null);
+  if (r32Games.length < 16) return null;
+
+  // team id → the R32 game it appears in
+  const gameOf = new Map<number, { a: number; b: number }>();
+  for (const k of r32Games) {
+    const a = k.home_id as number;
+    const b = k.away_id as number;
+    gameOf.set(a, { a, b });
+    gameOf.set(b, { a, b });
+  }
+
+  const standings = actualGroupStandings(fixtures);
+  const winners: Record<string, number> = {};
+  const runners: Record<string, number> = {};
+  for (const g of GROUP_LETTERS) {
+    const rows = standings[g];
+    if (!rows || rows.length < 2) return null;
+    winners[g] = rows[0].teamId;
+    runners[g] = rows[1].teamId;
+  }
+
+  // Seed each R32 slot from the mirror game containing its W/RU "anchor". Every
+  // slot has at least one W/RU side; its actual opponent is the third-place team.
+  const nodes = new Map<number, BracketNode>();
+  const usedGames = new Set<string>();
+  const key = (g: { a: number; b: number }) => [g.a, g.b].sort((x, y) => x - y).join('-');
+  for (const slot of R32_SLOTS) {
+    const anchor =
+      slot.home.type === 'W'
+        ? winners[slot.home.group]
+        : slot.home.type === 'RU'
+          ? runners[slot.home.group]
+          : slot.away.type === 'W'
+            ? winners[slot.away.group]
+            : slot.away.type === 'RU'
+              ? runners[slot.away.group]
+              : null;
+    if (anchor == null) return null;
+    const game = gameOf.get(anchor);
+    if (!game || usedGames.has(key(game))) return null; // unmapped or ambiguous → bail
+    usedGames.add(key(game));
+    nodes.set(slot.matchNo, { matchNo: slot.matchNo, round: 1, home: game.a, away: game.b, winner: null });
+  }
+  if (usedGames.size !== 16) return null;
+
+  // Fill winners from recorded stages and feed the later rounds (reuse FEEDS).
+  const stages: Record<number, number> = {};
+  for (const t of fixtures.teams) if (t.actual_stage != null) stages[t.id] = t.actual_stage;
+  const setWinner = (node: BracketNode) => {
+    if (node.home == null || node.away == null) return;
+    const homeAdv = (stages[node.home] ?? 0) > node.round;
+    const awayAdv = (stages[node.away] ?? 0) > node.round;
+    if (homeAdv !== awayAdv) node.winner = homeAdv ? node.home : node.away;
+  };
+  const ordered = [...R32_SLOTS.map((s) => s.matchNo), ...Object.keys(FEEDS).map(Number)].sort((a, b) => a - b);
+  for (const matchNo of ordered) {
+    let node = nodes.get(matchNo);
+    const feed = FEEDS[matchNo];
+    if (feed) {
+      node = {
+        matchNo,
+        round: ROUND_OF(matchNo),
+        home: nodes.get(feed[0])?.winner ?? null,
+        away: nodes.get(feed[1])?.winner ?? null,
+        winner: null,
+      };
+      nodes.set(matchNo, node);
+    }
+    if (node) setWinner(node);
+  }
+  return [...nodes.values()].sort((a, b) => a.matchNo - b.matchNo);
+}

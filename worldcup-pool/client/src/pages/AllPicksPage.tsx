@@ -2,13 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, Skeleton } from '@databricks/appkit-ui/react';
 import type { Fixtures, Me, Pick, Team } from '../lib/pool';
 import { STAGE_NAMES, STAGE_SHORT, fetchJson, teamCode } from '../lib/pool';
-import {
-  bracketProgress,
-  buildBracket,
-  computeGroupStandings,
-  computeQualifiers,
-  winnersFromStages,
-} from '../lib/bracket';
+import { actualBracket, bracketProgress } from '../lib/bracket';
 import { BracketCard } from './BracketCard';
 import { Toc } from '../components/Toc';
 
@@ -48,23 +42,9 @@ export function AllPicksPage({ me }: { me: Me }) {
     return map;
   }, [data]);
 
-  // The real tournament bracket, built the same way as a player's: recorded
-  // group results seed the Round of 32, and each team's recorded
-  // "furthest stage reached" reconstructs the knockout winners.
-  const realBracket = useMemo(() => {
-    if (!fixtures) return null;
-    const actualPicks: Record<number, Pick> = {};
-    for (const m of fixtures.matches) {
-      if (m.actual_result !== null) actualPicks[m.id] = m.actual_result;
-    }
-    const q = computeQualifiers(computeGroupStandings(actualPicks, fixtures));
-    if (!q) return null;
-    const actualStages: Record<number, number> = {};
-    for (const t of fixtures.teams) {
-      if (t.actual_stage !== null) actualStages[t.id] = t.actual_stage;
-    }
-    return buildBracket(q, winnersFromStages(q, actualStages));
-  }, [fixtures]);
+  // The real tournament bracket: R32 seeded from the actual ESPN matchups,
+  // winners filled in from each team's recorded furthest stage.
+  const realBracket = useMemo(() => (fixtures ? actualBracket(fixtures) : null), [fixtures]);
 
   if (!me.locked) {
     return (
@@ -360,8 +340,8 @@ export function AllPicksPage({ me }: { me: Me }) {
           decided={realBracket ? bracketProgress(realBracket).decided : 0}
           onPickWinner={() => undefined}
           title="Tournament Bracket (real results)"
-          description="For reference: seeded from the recorded group results and each team's furthest stage so far. Slot placement uses the pool's simplified tiebreakers, so it may differ slightly from the official bracket."
-          emptyText="Appears once all 72 group-stage results have been recorded."
+          description="The actual bracket — official Round of 32 matchups, filling in with each result as the knockouts are played."
+          emptyText="Appears once the Round of 32 matchups are set."
         />
       </div>
     </div>
