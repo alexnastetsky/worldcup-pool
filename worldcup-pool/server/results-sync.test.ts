@@ -98,6 +98,34 @@ describe('parseEspnDay', () => {
     expect(events[0].round).toBe(2); // Round of 16
     expect(events[0].homeId).toBeNull(); // unresolved placeholder slot
   });
+
+  it('rounds a finished knockout game from its date when ESPN gives no round label', () => {
+    // Mirrors the real R32 payload: notes [], name is just the teams.
+    const [e] = parseEspnDay({
+      events: [
+        {
+          id: '760400',
+          name: 'Canada at South Africa',
+          shortName: 'CAN @ RSA',
+          date: '2026-06-28T19:00Z',
+          competitions: [
+            {
+              status: { type: { state: 'post', completed: true } },
+              notes: [],
+              competitors: [
+                { homeAway: 'home', score: '0', winner: false, team: { displayName: 'South Africa' } },
+                { homeAway: 'away', score: '1', winner: true, team: { displayName: 'Canada' } },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(e.round).toBe(1); // R32 from the date, despite no round text
+    // …and that makes knockout progression actually fire for the winner.
+    const eff = knockoutEffect(e);
+    expect(eff).toEqual({ reach: 1, winnerId: teamIdFromName('Canada'), loserId: teamIdFromName('South Africa') });
+  });
 });
 
 describe('knockoutRoundForDate', () => {

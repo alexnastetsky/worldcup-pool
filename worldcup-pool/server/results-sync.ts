@@ -103,13 +103,25 @@ function roundFromText(text: string): Round | null {
   return null;
 }
 
-// The notes headline ("FIFA World Cup, Round of 16") is ESPN's authoritative
-// round label and is checked first: an unresolved knockout fixture's name and
-// shortName describe its *feeder* matches (placeholder side "Round of 32 1
-// Winner", shortName "RD32 @ RD32"), which would otherwise misclassify a later
-// round as an earlier one. The name/shortName are only a fallback.
-function parseRound(notesText: string, nameText: string, homeId: number | null, awayId: number | null): Round | null {
-  // A known group pair is always a group game, whatever the label says.
+// The kickoff DATE is the authoritative round signal and is checked first: the
+// fixed schedule cleanly separates the group stage from each knockout round,
+// whereas ESPN routinely omits the round label entirely (notes []) and names a
+// game after its feeders ("Quarterfinal Winner", "CAN @ RSA"). Text is only a
+// last-resort fallback. This drives both the mirror display and, crucially,
+// knockout progression (knockoutEffect) — without it, a finished knockout game
+// with no round label never advances its winner's stage.
+function parseRound(
+  notesText: string,
+  nameText: string,
+  kickoff: string | null,
+  homeId: number | null,
+  awayId: number | null
+): Round | null {
+  if (kickoff) {
+    const r = knockoutRoundForDate(easternDate(kickoff));
+    if (r !== null) return r === 'third' ? 'third' : (Number(r) as Round);
+  }
+  // A known group pair (group-stage date) is a group game.
   if (homeId !== null && awayId !== null && groupMatchByPair.has(pairKey(homeId, awayId))) {
     return 'group';
   }
@@ -170,7 +182,7 @@ export function parseEspnDay(json: EspnScoreboard): EspnEvent[] {
       state,
       kickoff: ev.date ?? null,
       winnerId,
-      round: parseRound(notesText, nameText, homeId, awayId),
+      round: parseRound(notesText, nameText, ev.date ?? null, homeId, awayId),
     });
   }
   return events;
