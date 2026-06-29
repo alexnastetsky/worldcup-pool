@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { SEED_MATCHES } from './seed-data';
-import type { EspnEvent, Result } from './results-sync';
+import type { EspnEvent } from './results-sync';
 import {
-  computeQualifierIds,
   easternDate,
   groupResult,
   knockoutEffect,
@@ -206,20 +204,6 @@ describe('groupResult orientation', () => {
       round: 'group',
     };
     expect(groupResult(draw, { homeId: mexId })).toBe('D');
-  });
-});
-
-describe('computeQualifierIds', () => {
-  it('returns null until all 72 group results exist', () => {
-    const partial = new Map<number, Result>([[1, 'H']]);
-    expect(computeQualifierIds(partial)).toBeNull();
-  });
-
-  it('selects exactly 32 qualifiers (12 winners + 12 runners-up + 8 thirds)', () => {
-    const all = new Map<number, Result>(SEED_MATCHES.map((m) => [m.id, 'H' as Result]));
-    const q = computeQualifierIds(all);
-    expect(q).not.toBeNull();
-    expect(q?.size).toBe(32);
   });
 });
 

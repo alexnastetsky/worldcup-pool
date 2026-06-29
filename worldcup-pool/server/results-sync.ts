@@ -203,85 +203,6 @@ export function groupResult(event: EspnEvent, gm: { homeId: number }): Result {
   return ourHome > ourAway ? 'H' : ourHome < ourAway ? 'A' : 'D';
 }
 
-interface Row {
-  teamId: number;
-  pts: number;
-  wins: number;
-}
-
-// The 32 qualifiers (12 winners + 12 runners-up + 8 best thirds) from final
-// group results. Mirrors the client's standings/qualifier tiebreaks: points
-// (3/1/0) → head-to-head among tied teams → seeding (team id). Returns null
-// until all 72 group results are present.
-export function computeQualifierIds(results: Map<number, Result>): Set<number> | null {
-  if (SEED_MATCHES.some((m) => !results.has(m.id))) return null;
-
-  const matchIdByPair = new Map<string, number>();
-  for (const m of SEED_MATCHES) {
-    matchIdByPair.set(pairKey(idByName.get(m.home) as number, idByName.get(m.away) as number), m.id);
-  }
-  const resultForPair = (a: number, b: number): Result | undefined => {
-    const id = matchIdByPair.get(pairKey(a, b));
-    return id === undefined ? undefined : results.get(id);
-  };
-  // Which of two teams won their head-to-head, from the seed-oriented result.
-  const winnerFromPair = (teamA: number, teamB: number, r: Result): number => {
-    const id = matchIdByPair.get(pairKey(teamA, teamB));
-    const m = SEED_MATCHES.find((x) => x.id === id);
-    if (!m) return teamA;
-    return r === 'H' ? (idByName.get(m.home) as number) : (idByName.get(m.away) as number);
-  };
-
-  const groups = [...new Set(SEED_TEAMS.map((t) => t.group))];
-  const thirds: Row[] = [];
-  const qualifiers = new Set<number>();
-
-  for (const g of groups) {
-    const teams = SEED_TEAMS.filter((t) => t.group === g).map((t) => t.id);
-    const pts = new Map(teams.map((id) => [id, 0]));
-    const wins = new Map(teams.map((id) => [id, 0]));
-    for (const m of SEED_MATCHES.filter((x) => x.group === g)) {
-      const homeId = idByName.get(m.home) as number;
-      const awayId = idByName.get(m.away) as number;
-      const r = results.get(m.id) as Result;
-      if (r === 'H') {
-        pts.set(homeId, (pts.get(homeId) ?? 0) + 3);
-        wins.set(homeId, (wins.get(homeId) ?? 0) + 1);
-      } else if (r === 'A') {
-        pts.set(awayId, (pts.get(awayId) ?? 0) + 3);
-        wins.set(awayId, (wins.get(awayId) ?? 0) + 1);
-      } else {
-        pts.set(homeId, (pts.get(homeId) ?? 0) + 1);
-        pts.set(awayId, (pts.get(awayId) ?? 0) + 1);
-      }
-    }
-    const rows: Row[] = teams.map((id) => ({ teamId: id, pts: pts.get(id) ?? 0, wins: wins.get(id) ?? 0 }));
-    rows.sort((a, b) => b.pts - a.pts || b.wins - a.wins || a.teamId - b.teamId);
-
-    // Break two-way points ties on head-to-head.
-    for (let i = 0; i < rows.length; ) {
-      let j = i + 1;
-      while (j < rows.length && rows[j].pts === rows[i].pts) j++;
-      if (j - i === 2) {
-        const r = resultForPair(rows[i].teamId, rows[i + 1].teamId);
-        if (r && r !== 'D') {
-          const pairWinner = winnerFromPair(rows[i].teamId, rows[i + 1].teamId, r);
-          if (pairWinner === rows[i + 1].teamId) [rows[i], rows[i + 1]] = [rows[i + 1], rows[i]];
-        }
-      }
-      i = j;
-    }
-
-    qualifiers.add(rows[0].teamId);
-    qualifiers.add(rows[1].teamId);
-    thirds.push(rows[2]);
-  }
-
-  thirds.sort((a, b) => b.pts - a.pts || b.wins - a.wins || a.teamId - b.teamId);
-  for (const t of thirds.slice(0, 8)) qualifiers.add(t.teamId);
-  return qualifiers;
-}
-
 export interface KnockoutEffect {
   reach: number; // both teams reached this stage
   winnerId: number | null; // advances to reach+1
@@ -405,58 +326,14 @@ export async function syncResults(appkit: AppKitLakebase, opts: { allDates?: boo
       }
     }
 
-    // (b) qualifiers, once every group result is recorded
-    const { rows: matchRows } = await appkit.lakebase.query('SELECT id, actual_result FROM pool.matches');
-    const resultMap = new Map<number, Result>();
-    for (const r of matchRows) {
-      if (r.actual_result) resultMap.set(r.id as number, r.actual_result as Result);
-    }
-    const qualifierIds = computeQualifierIds(resultMap);
-    if (qualifierIds) {
-      const ids = [...qualifierIds];
-      await appkit.lakebase.query(
-        `UPDATE pool.teams SET actual_stage = GREATEST(COALESCE(actual_stage, 0), 1)
-         WHERE id = ANY($1) AND stage_manual = FALSE AND COALESCE(actual_stage, 0) < 1`,
-        [ids]
-      );
-      await appkit.lakebase.query(
-        `UPDATE pool.teams SET actual_stage = 0, eliminated = TRUE
-         WHERE id <> ALL($1) AND stage_manual = FALSE`,
-        [ids]
-      );
-    }
-
-    // (c) knockout progression
-    let knockoutGames = 0;
-    for (const e of events) {
-      const eff = knockoutEffect(e);
-      if (!eff) continue;
-      knockoutGames += 1;
-      await appkit.lakebase.query(
-        `UPDATE pool.teams SET actual_stage = GREATEST(COALESCE(actual_stage, 0), $2)
-         WHERE id = ANY($1) AND stage_manual = FALSE`,
-        [[e.homeId, e.awayId], eff.reach]
-      );
-      if (eff.winnerId !== null) {
-        await appkit.lakebase.query(
-          `UPDATE pool.teams SET actual_stage = GREATEST(COALESCE(actual_stage, 0), $2)
-           WHERE id = $1 AND stage_manual = FALSE`,
-          [eff.winnerId, eff.reach + 1]
-        );
-      }
-      if (eff.loserId !== null) {
-        await appkit.lakebase.query(`UPDATE pool.teams SET eliminated = TRUE WHERE id = $1 AND stage_manual = FALSE`, [
-          eff.loserId,
-        ]);
-      }
-    }
-
-    // (d) mirror knockout + third-place fixtures for display on the Today page.
-    // These are never picked (knockouts score via bracket_predictions), so they
-    // live in their own table and don't touch pool.matches or scoring. ESPN
-    // supplies resolved teams once known and placeholder slot names otherwise
-    // ("Round of 32 1 Winner"), which the upsert resolves over time. Round is
-    // derived from the (fixed) match date, not ESPN's unreliable round text.
+    // (b) mirror knockout + third-place fixtures. Besides driving the Today-page
+    // display, the Round-of-32 rows are the AUTHORITATIVE source for who reached
+    // the knockouts (used in (c)). They're never picked (knockouts score via
+    // bracket_predictions), so they live in their own table and don't touch
+    // pool.matches. ESPN supplies resolved teams once known and placeholder slot
+    // names otherwise ("Round of 32 1 Winner"); round is derived from the (fixed)
+    // match date, not ESPN's unreliable round text. Runs before (c) so the mirror
+    // is fresh when the qualifier set is read.
     for (const e of events) {
       if (e.espnId === null || e.kickoff === null) continue;
       const matchDate = easternDate(e.kickoff);
@@ -486,6 +363,61 @@ export async function syncResults(appkit: AppKitLakebase, opts: { allDates?: boo
           e.state,
         ]
       );
+    }
+
+    // (c) qualifiers: the 32 Round-of-32 teams come from the mirror (the real
+    // ESPN draw), NOT reconstructed from group standings — group tiebreakers
+    // without goal difference pick the wrong third-place teams. Act only once all
+    // 16 R32 games are drawn with both teams mapped (32 distinct ids), so we never
+    // write a partial or guessed set.
+    const { rows: r32Rows } = await appkit.lakebase.query(
+      `SELECT home_id, away_id FROM pool.knockout_matches
+       WHERE round = '1' AND home_id IS NOT NULL AND away_id IS NOT NULL`
+    );
+    const qualifierIds = new Set<number>();
+    for (const r of r32Rows) {
+      qualifierIds.add(r.home_id as number);
+      qualifierIds.add(r.away_id as number);
+    }
+    if (qualifierIds.size === 32) {
+      const ids = [...qualifierIds];
+      // Qualifiers reached R32 and are alive there; knockout progression (d)
+      // re-marks any that have since lost. Everyone else went out in groups.
+      await appkit.lakebase.query(
+        `UPDATE pool.teams SET actual_stage = GREATEST(COALESCE(actual_stage, 0), 1), eliminated = FALSE
+         WHERE id = ANY($1) AND stage_manual = FALSE`,
+        [ids]
+      );
+      await appkit.lakebase.query(
+        `UPDATE pool.teams SET actual_stage = 0, eliminated = TRUE
+         WHERE id <> ALL($1) AND stage_manual = FALSE`,
+        [ids]
+      );
+    }
+
+    // (d) knockout progression
+    let knockoutGames = 0;
+    for (const e of events) {
+      const eff = knockoutEffect(e);
+      if (!eff) continue;
+      knockoutGames += 1;
+      await appkit.lakebase.query(
+        `UPDATE pool.teams SET actual_stage = GREATEST(COALESCE(actual_stage, 0), $2)
+         WHERE id = ANY($1) AND stage_manual = FALSE`,
+        [[e.homeId, e.awayId], eff.reach]
+      );
+      if (eff.winnerId !== null) {
+        await appkit.lakebase.query(
+          `UPDATE pool.teams SET actual_stage = GREATEST(COALESCE(actual_stage, 0), $2)
+           WHERE id = $1 AND stage_manual = FALSE`,
+          [eff.winnerId, eff.reach + 1]
+        );
+      }
+      if (eff.loserId !== null) {
+        await appkit.lakebase.query(`UPDATE pool.teams SET eliminated = TRUE WHERE id = $1 AND stage_manual = FALSE`, [
+          eff.loserId,
+        ]);
+      }
     }
 
     const summary: SyncSummary = {
