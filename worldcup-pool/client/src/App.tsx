@@ -49,22 +49,38 @@ function Layout({ me, refreshMe }: { me: Me; refreshMe: () => void }) {
         <span className="ml-auto text-xs text-muted-foreground hidden sm:inline">{me.email}</span>
       </header>
 
-      <div
-        className={`px-4 py-1.5 text-center text-sm ${
-          me.locked
-            ? 'bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100'
-            : 'bg-green-100 text-green-900 dark:bg-green-900 dark:text-green-100'
-        }`}
-      >
-        {me.locked
-          ? 'Submissions are locked — standings and all picks are live.'
-          : 'Submissions are open — make your picks before the pool locks!'}
-      </div>
+      {!me.locked && (
+        <div className="px-4 py-1.5 text-center text-sm bg-green-100 text-green-900 dark:bg-green-900 dark:text-green-100">
+          Submissions are open — make your picks before the pool locks!
+        </div>
+      )}
 
       <main className="flex-1 p-4 md:p-6">
         <Outlet context={{ me, refreshMe }} />
       </main>
+      <BackToTop />
     </div>
+  );
+}
+
+function BackToTop() {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setShow(window.scrollY > 400);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+  if (!show) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+      aria-label="Back to top"
+      className="fixed bottom-6 right-4 z-50 rounded-full border bg-background/90 px-3 py-2 text-sm shadow-md backdrop-blur transition-colors hover:bg-muted"
+    >
+      ↑ Top
+    </button>
   );
 }
 
