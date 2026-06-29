@@ -79,17 +79,38 @@ export function AllPicksPage({ me }: { me: Me }) {
   const pickShort = (pick: Pick, m: { home_team_id: number; away_team_id: number }) =>
     pick === 'D' ? 'draw' : teamCode(pickFull(pick, m));
 
+  // Date of a team's match in a given knockout round, for ordering.
+  const knockoutDate = new Map<string, string>();
+  for (const k of fixtures.knockout) {
+    if (k.home_id != null) knockoutDate.set(`${k.round}|${k.home_id}`, k.match_date);
+    if (k.away_id != null) knockoutDate.set(`${k.round}|${k.away_id}`, k.match_date);
+  }
+  // The team plays round s on its way to stage s (champions' last game is the Final, round 5).
+  const roundDateFor = (s: number, teamId: number) => knockoutDate.get(`${s >= 6 ? 5 : s}|${teamId}`) ?? '';
+
   // For a knockout stage s (1=R32 … 6=Champion): the teams that actually
   // reached it, each with the shown players who predicted them that far or
-  // deeper (cumulative, matching bracket scoring). Most-called teams first.
-  const callersForStage = (s: number) =>
-    fixtures.teams
+  // deeper (cumulative, matching bracket scoring). The Round of 32 is ordered
+  // least-picked first (surfaces the surprise/contrarian teams); later rounds by
+  // the team's match date in that round.
+  const callersForStage = (s: number) => {
+    const rows = fixtures.teams
       .filter((t) => t.actual_stage != null && t.actual_stage >= s)
       .map((t) => ({
         team: t,
         callers: shownPlayers.filter((p) => (bracketPickMap.get(`${p.email}|${t.id}`) ?? 0) >= s),
-      }))
-      .sort((a, b) => b.callers.length - a.callers.length || a.team.name.localeCompare(b.team.name));
+      }));
+    if (s === 1) {
+      rows.sort((a, b) => a.callers.length - b.callers.length || a.team.name.localeCompare(b.team.name));
+    } else {
+      rows.sort(
+        (a, b) =>
+          roundDateFor(s, a.team.id).localeCompare(roundDateFor(s, b.team.id)) ||
+          a.team.name.localeCompare(b.team.name)
+      );
+    }
+    return rows;
+  };
   // Stages with at least one team there yet, deepest first.
   const reachedStages = [6, 5, 4, 3, 2, 1].filter((s) => callersForStage(s).length > 0);
 
