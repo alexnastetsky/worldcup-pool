@@ -69,6 +69,8 @@ export interface StandingRow {
   display_name: string;
   group_points: number;
   bracket_points: number;
+  bracket_prev: number; // bracket points banked before the current knockout round
+  bracket_current: number; // bracket points gained from the round currently in play
   total_points: number;
   max_points: number;
   contrarian: number; // "bold calls" tiebreaker: correct picks weighted by how many others missed them

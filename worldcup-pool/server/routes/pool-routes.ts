@@ -1,13 +1,26 @@
 import { z } from 'zod';
 import { Application, Request, Response } from 'express';
 import { SEED_TEAMS, SEED_MATCHES } from '../seed-data';
-import { syncResults } from '../results-sync';
+import { syncResults, easternDate } from '../results-sync';
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
 // The current US Eastern calendar date — the whole pool keys date boundaries
 // (matchday, daily standings snapshots) off Eastern time rather than UTC.
 const EASTERN_TODAY_SQL = "(NOW() AT TIME ZONE 'America/New_York')::date";
+
+// The latest knockout round whose games have started (by US-Eastern date), used
+// to split bracket points into "banked before this round" vs "gained this round".
+// Fixed FIFA 2026 round start dates; 0 before the Round of 32 begins.
+function currentKnockoutRound(easternToday: string): number {
+  if (easternToday >= '2026-07-19') return 5; // Final
+  if (easternToday >= '2026-07-14') return 4; // Semifinals
+  if (easternToday >= '2026-07-09') return 3; // Quarterfinals
+  if (easternToday >= '2026-07-04') return 2; // Round of 16
+  if (easternToday >= '2026-06-28') return 1; // Round of 32
+  return 0;
+}
+const currentRoundNow = () => currentKnockoutRound(easternDate(new Date().toISOString()));
 
 interface AppKitWithLakebase {
   lakebase: {
@@ -56,7 +69,12 @@ const STANDINGS_TOTALS_CTE = `
     GROUP BY mp.email
   ),
   bracket_pts AS (
-    SELECT bp.email, SUM(${BRACKET_EARNED_SQL}) AS pts, SUM(${BRACKET_MAX_SQL}) AS max_pts
+    SELECT bp.email,
+           SUM(${BRACKET_EARNED_SQL}) AS pts,
+           -- points for reaching up to the current round ($1): the "previous"
+           -- (banked) portion. The rest is what this round's results just added.
+           SUM(${cumulativePointsSql('LEAST(bp.predicted_stage, COALESCE(t.actual_stage, 0), $1)')}) AS prev_pts,
+           SUM(${BRACKET_MAX_SQL}) AS max_pts
     FROM pool.bracket_predictions bp JOIN pool.teams t ON t.id = bp.team_id
     GROUP BY bp.email
   ),
@@ -86,6 +104,8 @@ const STANDINGS_TOTALS_CTE = `
     SELECT p.email, p.display_name,
            COALESCE(g.pts, 0)::int AS group_points,
            COALESCE(b.pts, 0)::int AS bracket_points,
+           COALESCE(b.prev_pts, 0)::int AS bracket_prev,
+           (COALESCE(b.pts, 0) - COALESCE(b.prev_pts, 0))::int AS bracket_current,
            (COALESCE(g.pts, 0) + COALESCE(b.pts, 0))::int AS total_points,
            (COALESCE(g.max_pts, 0) + COALESCE(b.max_pts, 0))::int AS max_points,
            COALESCE(c.score, 0)::int AS contrarian
@@ -295,7 +315,8 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
       console.log(`[pool] results sync: ${JSON.stringify(s)}`);
       const { rows } = await appkit.lakebase.query('SELECT locked FROM pool.app_state WHERE id = 1');
       if (rows[0]?.locked === true) {
-        await appkit.lakebase.query(`
+        await appkit.lakebase.query(
+          `
           ${STANDINGS_TOTALS_CTE}
           INSERT INTO pool.standings_snapshots (snapshot_date, email, total_points, bracket_points, contrarian)
           SELECT ${EASTERN_TODAY_SQL}, email, total_points, bracket_points, contrarian FROM totals
@@ -303,7 +324,9 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
             total_points = EXCLUDED.total_points,
             bracket_points = EXCLUDED.bracket_points,
             contrarian = EXCLUDED.contrarian
-        `);
+        `,
+          [currentRoundNow()]
+        );
       }
     } catch (e) {
       console.warn('[pool] results sync failed:', (e as Error).message);
@@ -481,7 +504,8 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
           res.status(403).json({ error: 'Standings are hidden until submissions are locked' });
           return;
         }
-        const { rows } = await appkit.lakebase.query(`
+        const { rows } = await appkit.lakebase.query(
+          `
           ${STANDINGS_TOTALS_CTE},
           prev AS (
             SELECT email, RANK() OVER (
@@ -493,11 +517,14 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
             )
           )
           SELECT s.email, s.display_name, s.group_points, s.bracket_points,
+                 s.bracket_prev, s.bracket_current,
                  s.total_points, s.max_points, s.contrarian, prev.rk::int AS prev_rank
           FROM totals s
           LEFT JOIN prev ON prev.email = s.email
           ORDER BY s.total_points DESC, s.bracket_points DESC, s.contrarian DESC, s.display_name
-        `);
+        `,
+          [currentRoundNow()]
+        );
         res.json(rows);
       } catch (err) {
         handleError(res, 'Failed to compute standings', err);

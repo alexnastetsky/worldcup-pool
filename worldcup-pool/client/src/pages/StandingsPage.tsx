@@ -77,8 +77,10 @@ export function StandingsPage({ me }: { me: Me }) {
           {rows && rows.length > 0 && (
             <>
               <p className="text-xs text-muted-foreground mb-2">
-                Max = points still reachable given eliminated teams and remaining matches. 🎯 = bold calls (correct
-                picks weighted by how many others missed them), used to break ties on equal points. Click a row for the
+                Bracket shows points banked before this knockout round; the green{' '}
+                <span className="text-green-600 font-medium">+N</span> is what the round in play has added so far. Max =
+                points still reachable given eliminated teams and remaining matches. 🎯 = bold calls (correct picks
+                weighted by how many others missed them), used to break ties on equal points. Click a row for the
                 breakdown.
               </p>
               {movers.length > 0 && (
@@ -130,7 +132,12 @@ export function StandingsPage({ me }: { me: Me }) {
                           {r.display_name}
                         </td>
                         <td className="py-2 pr-2 text-right">{r.group_points}</td>
-                        <td className="py-2 pr-2 text-right">{r.bracket_points}</td>
+                        <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums">
+                          {r.bracket_prev}
+                          {r.bracket_current > 0 && (
+                            <span className="ml-1 text-green-600 font-medium">+{r.bracket_current}</span>
+                          )}
+                        </td>
                         <td className="py-2 pr-2 text-right font-medium">{r.total_points}</td>
                         <td className="py-2 pr-2 text-right text-muted-foreground tabular-nums">{r.contrarian}</td>
                         <td className="py-2 text-right text-muted-foreground">{r.max_points}</td>
