@@ -226,6 +226,19 @@ function Breakdown({ email, fixtures, allPicks }: { email: string; fixtures: Fix
       </div>
       <div>
         <p className="font-medium mb-1">Bracket: {b.bracketPoints} pts</p>
+        <div className="text-xs text-muted-foreground mb-2 space-y-0.5">
+          <p>
+            One row per team you predicted, sorted by how far you picked it. Each shows the round you predicted it to
+            reach — <span className="font-medium text-foreground">R32 · R16 · QF · SF · F · 🏆</span> (or{' '}
+            <span className="font-medium text-foreground">—</span> = out in groups) — then{' '}
+            <span className="font-medium text-foreground">+N</span>, the bracket points it has earned you so far.
+          </p>
+          <p>
+            <span className="text-green-600">✓</span> reached your pick — points banked ·{' '}
+            <span>•</span> still <span className="italic">(alive)</span> — can still get there ·{' '}
+            <span className="text-destructive">✗</span> out before your pick — final.
+          </p>
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-0.5 text-xs">
           {b.teamRows.map((r) => (
             <div key={r.team.id} className="flex items-center gap-1.5">
