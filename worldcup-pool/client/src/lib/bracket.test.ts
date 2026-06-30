@@ -254,6 +254,8 @@ describe('actualBracket', () => {
     away_id: n.away,
     home_score: null,
     away_score: null,
+    home_pens: null,
+    away_pens: null,
     status: 'pre',
   }));
   const fxKO: Fixtures = { ...fxScored, knockout };

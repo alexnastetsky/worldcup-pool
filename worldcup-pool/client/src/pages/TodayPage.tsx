@@ -196,6 +196,11 @@ export function TodayPage({ me }: { me: Me }) {
     const live = k.status === 'in';
     const final = k.status === 'post';
     const score = k.home_score !== null && k.away_score !== null ? `${k.home_score}–${k.away_score}` : null;
+    // Penalty shootout: shown only when it actually decided the game (scores differ).
+    const pens =
+      k.home_pens !== null && k.away_pens !== null && k.home_pens !== k.away_pens
+        ? `${k.home_pens}–${k.away_pens} pens`
+        : null;
     const kickoff = kickoffTime(k.kickoff_at);
 
     // Each side's callers are the players who predicted that team to advance
@@ -227,6 +232,7 @@ export function TodayPage({ me }: { me: Me }) {
             </span>
           </span>
           {score && <span className="font-semibold tabular-nums">{score}</span>}
+          {pens && <span className="text-[10px] text-muted-foreground shrink-0 whitespace-nowrap">({pens})</span>}
           {live ? (
             <span className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0 bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200">
               LIVE

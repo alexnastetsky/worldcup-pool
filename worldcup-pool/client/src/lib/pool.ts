@@ -43,6 +43,8 @@ export interface KnockoutMatch {
   away_id: number | null;
   home_score: number | null;
   away_score: number | null;
+  home_pens: number | null; // penalty-shootout score, null when no shootout
+  away_pens: number | null;
   status: 'pre' | 'in' | 'post' | null;
 }
 

@@ -85,6 +85,8 @@ export interface EspnEvent {
   awayId: number | null;
   homeScore: number;
   awayScore: number;
+  homePens: number | null; // penalty-shootout score, null when no shootout
+  awayPens: number | null;
   completed: boolean;
   state: 'pre' | 'in' | 'post'; // ESPN status: scheduled / live / final
   kickoff: string | null; // ISO kickoff datetime (ESPN events[].date)
@@ -132,6 +134,7 @@ function parseRound(
 interface EspnCompetitor {
   homeAway?: string;
   score?: string | number;
+  shootoutScore?: string | number; // penalty-shootout goals, present on knockout draws
   winner?: boolean;
   team?: { displayName?: string };
 }
@@ -167,6 +170,8 @@ export function parseEspnDay(json: EspnScoreboard): EspnEvent[] {
     const nameText = [ev.name, ev.shortName].filter(Boolean).join(' ');
     const homeScore = parseInt(String(home.score ?? ''), 10);
     const awayScore = parseInt(String(away.score ?? ''), 10);
+    const homePens = parseInt(String(home.shootoutScore ?? ''), 10);
+    const awayPens = parseInt(String(away.shootoutScore ?? ''), 10);
     const winnerId = home.winner ? homeId : away.winner ? awayId : null;
     const rawState = comp.status?.type?.state;
     const state: EspnEvent['state'] = rawState === 'in' || rawState === 'post' ? rawState : 'pre';
@@ -178,6 +183,8 @@ export function parseEspnDay(json: EspnScoreboard): EspnEvent[] {
       awayId,
       homeScore: Number.isNaN(homeScore) ? 0 : homeScore,
       awayScore: Number.isNaN(awayScore) ? 0 : awayScore,
+      homePens: Number.isNaN(homePens) ? null : homePens,
+      awayPens: Number.isNaN(awayPens) ? null : awayPens,
       completed: comp.status?.type?.completed === true,
       state,
       kickoff: ev.date ?? null,
@@ -342,13 +349,14 @@ export async function syncResults(appkit: AppKitLakebase, opts: { allDates?: boo
       const live = e.state !== 'pre';
       await appkit.lakebase.query(
         `INSERT INTO pool.knockout_matches
-           (espn_id, round, match_date, kickoff_at, home_name, away_name, home_id, away_id, home_score, away_score, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           (espn_id, round, match_date, kickoff_at, home_name, away_name, home_id, away_id, home_score, away_score, home_pens, away_pens, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          ON CONFLICT (espn_id) DO UPDATE SET
            round = EXCLUDED.round, match_date = EXCLUDED.match_date, kickoff_at = EXCLUDED.kickoff_at,
            home_name = EXCLUDED.home_name, away_name = EXCLUDED.away_name,
            home_id = EXCLUDED.home_id, away_id = EXCLUDED.away_id,
-           home_score = EXCLUDED.home_score, away_score = EXCLUDED.away_score, status = EXCLUDED.status`,
+           home_score = EXCLUDED.home_score, away_score = EXCLUDED.away_score,
+           home_pens = EXCLUDED.home_pens, away_pens = EXCLUDED.away_pens, status = EXCLUDED.status`,
         [
           e.espnId,
           round,
@@ -360,6 +368,8 @@ export async function syncResults(appkit: AppKitLakebase, opts: { allDates?: boo
           e.awayId,
           live ? e.homeScore : null,
           live ? e.awayScore : null,
+          live ? e.homePens : null,
+          live ? e.awayPens : null,
           e.state,
         ]
       );

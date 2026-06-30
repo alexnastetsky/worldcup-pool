@@ -151,6 +151,8 @@ const SETUP_SQL = `
     away_id    INT REFERENCES pool.teams(id),
     home_score INT,
     away_score INT,
+    home_pens  INT,                    -- penalty-shootout score (NULL if no shootout)
+    away_pens  INT,
     status     TEXT                    -- 'pre' | 'in' | 'post'
   );
 
@@ -264,6 +266,9 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
     await appkit.lakebase.query('ALTER TABLE pool.matches ADD COLUMN IF NOT EXISTS away_score INT');
     await appkit.lakebase.query('ALTER TABLE pool.matches ADD COLUMN IF NOT EXISTS status TEXT');
     await appkit.lakebase.query('ALTER TABLE pool.matches ADD COLUMN IF NOT EXISTS kickoff_at TIMESTAMPTZ');
+    // Migration: penalty-shootout score for knockout fixtures (display only).
+    await appkit.lakebase.query('ALTER TABLE pool.knockout_matches ADD COLUMN IF NOT EXISTS home_pens INT');
+    await appkit.lakebase.query('ALTER TABLE pool.knockout_matches ADD COLUMN IF NOT EXISTS away_pens INT');
     await appkit.lakebase.query(`
       CREATE TABLE IF NOT EXISTS pool.standings_snapshots (
         snapshot_date DATE NOT NULL,
@@ -392,7 +397,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
         const knockout = await appkit.lakebase.query(
           `SELECT espn_id, round, TO_CHAR(match_date, 'YYYY-MM-DD') AS match_date,
                   kickoff_at, home_name, away_name, home_id, away_id,
-                  home_score, away_score, status
+                  home_score, away_score, home_pens, away_pens, status
            FROM pool.knockout_matches ORDER BY match_date, kickoff_at`
         );
         res.json({ teams: teams.rows, matches: matches.rows, knockout: knockout.rows });
