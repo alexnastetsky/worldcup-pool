@@ -66,7 +66,20 @@ export function playerBreakdown(
     const actual = team.actual_stage ?? 0;
     const earned = CUM_POINTS[Math.min(p.predicted_stage, actual)];
     const terminal = team.eliminated || team.actual_stage === 6;
-    const status: BreakdownTeamRow['status'] = actual >= p.predicted_stage ? 'done' : terminal ? 'out' : 'alive';
+    const status: BreakdownTeamRow['status'] =
+      p.predicted_stage === 0
+        ? // Bet the team goes out in groups: correct once it's confirmed out,
+          // wrong the moment it advances, otherwise still undecided.
+          team.actual_stage === null
+          ? 'alive'
+          : team.actual_stage === 0
+            ? 'done'
+            : 'out'
+        : actual >= p.predicted_stage
+          ? 'done'
+          : terminal
+            ? 'out'
+            : 'alive';
     bracketPoints += earned;
     teamRows.push({ team, predictedStage: p.predicted_stage, earned, status });
   }

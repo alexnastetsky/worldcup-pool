@@ -236,7 +236,8 @@ function Breakdown({ email, fixtures, allPicks }: { email: string; fixtures: Fix
           <p>
             <span className="text-green-600">✓</span> reached your pick — points banked ·{' '}
             <span>•</span> still <span className="italic">(alive)</span> — can still get there ·{' '}
-            <span className="text-destructive">✗</span> out before your pick — final.
+            <span className="text-destructive">✗</span> out before your pick — final ·{' '}
+            <span>💩</span> you picked it to go out, but it advanced past group stages.
           </p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-0.5 text-xs">
@@ -251,7 +252,13 @@ function Breakdown({ email, fixtures, allPicks }: { email: string; fixtures: Fix
                       : 'text-muted-foreground'
                 }
               >
-                {r.status === 'out' ? '✗' : r.status === 'done' ? '✓' : '•'}
+                {r.status === 'out'
+                  ? r.predictedStage === 0
+                    ? '💩'
+                    : '✗'
+                  : r.status === 'done'
+                    ? '✓'
+                    : '•'}
               </span>
               <span className="flex-1 truncate">{r.team.name}</span>
               <span className="text-muted-foreground">

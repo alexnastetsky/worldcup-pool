@@ -348,6 +348,10 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
   appkit.server.extend((app) => {
     // Resolve identity once per request; reject unauthenticated calls.
     app.use('/api', (req, res, next) => {
+      // Every /api response is live, per-request data (fixtures, picks, standings).
+      // Forbid browser/edge caching so two users never see different snapshots —
+      // e.g. one seeing a team as still alive after it has been eliminated.
+      res.set('Cache-Control', 'no-store');
       const email = getUserEmail(req);
       if (!email) {
         res.status(401).json({ error: 'No user identity (x-forwarded-email missing)' });
