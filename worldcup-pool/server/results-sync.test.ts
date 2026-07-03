@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EspnEvent } from './results-sync';
 import {
   easternDate,
@@ -6,6 +6,7 @@ import {
   knockoutEffect,
   knockoutRoundForDate,
   parseEspnDay,
+  syncResults,
   teamIdFromName,
 } from './results-sync';
 
@@ -246,5 +247,113 @@ describe('knockoutEffect', () => {
     expect(knockoutEffect({ ...base, round: 'third' })).toBeNull();
     expect(knockoutEffect({ ...base, completed: false })).toBeNull();
     expect(knockoutEffect({ ...base, homeId: null })).toBeNull();
+  });
+});
+
+// Regression: a knockout loser must STAY eliminated once its game leaves the
+// rolling fetch window. The qualifier step runs on every sync and used to
+// clear `eliminated` for all 32 R32 teams, resurrecting losers that knockout
+// progression could no longer see (e.g. Germany/Netherlands, out on pens on
+// June 29, shown alive again from July 1). The fake Lakebase below applies
+// the sync's pool.teams writes to an in-memory table, honoring whichever SQL
+// variant arrives so the buggy form actually fails the test.
+describe('syncResults keeps out-of-window knockout losers eliminated', () => {
+  const GER = teamIdFromName('Germany') as number;
+  const PAR = teamIdFromName('Paraguay') as number;
+
+  interface TeamRow {
+    actual_stage: number | null;
+    eliminated: boolean;
+  }
+
+  function fakeAppkit(teams: Map<number, TeamRow>, knockout: { home_id: number; away_id: number }[]) {
+    const stage = (t: TeamRow) => t.actual_stage ?? 0;
+    return {
+      lakebase: {
+        async query(text: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }> {
+          if (/FROM pool\.knockout_matches/.test(text)) return { rows: [...knockout] };
+          if (/UPDATE pool\.teams/.test(text)) {
+            const gated = /COALESCE\(actual_stage, 0\) < 1/.test(text);
+            if (/eliminated = FALSE/.test(text)) {
+              for (const id of params![0] as number[]) {
+                const t = teams.get(id);
+                if (!t || (gated && stage(t) >= 1)) continue;
+                t.actual_stage = Math.max(stage(t), 1);
+                t.eliminated = false;
+              }
+            } else if (/actual_stage = 0, eliminated = TRUE/.test(text)) {
+              const ids = new Set(params![0] as number[]);
+              for (const [id, t] of teams) if (!ids.has(id)) Object.assign(t, { actual_stage: 0, eliminated: true });
+            } else if (/GREATEST/.test(text)) {
+              const target = params![0];
+              const reach = params![1] as number;
+              for (const id of Array.isArray(target) ? (target as number[]) : [target as number]) {
+                const t = teams.get(id);
+                if (t) t.actual_stage = Math.max(stage(t), reach);
+              }
+            } else if (/eliminated = TRUE WHERE id = \$1/.test(text)) {
+              const t = teams.get(params![0] as number);
+              if (t) t.eliminated = true;
+            }
+          }
+          return { rows: [] };
+        },
+      },
+    };
+  }
+
+  function scoreboard(events: object[]) {
+    return { ok: true, json: async () => ({ events }) };
+  }
+
+  const r32Game = {
+    id: '999001',
+    name: 'Paraguay at Germany',
+    date: '2026-06-29T20:30Z',
+    competitions: [
+      {
+        status: { type: { state: 'post', completed: true } },
+        notes: [],
+        competitors: [
+          { homeAway: 'home', score: '1', shootoutScore: 3, winner: false, team: { displayName: 'Germany' } },
+          { homeAway: 'away', score: '1', shootoutScore: 4, winner: true, team: { displayName: 'Paraguay' } },
+        ],
+      },
+    ],
+  };
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('does not resurrect a loser on later syncs that no longer fetch its game', async () => {
+    // 32 qualifier ids (including Germany and Paraguay) already mirrored from
+    // the ESPN draw, so the qualifier step fires on every sync.
+    const ids = new Set<number>([GER, PAR]);
+    for (let i = 1; ids.size < 32; i++) ids.add(i);
+    const qualifiers = [...ids];
+    const knockout: { home_id: number; away_id: number }[] = [];
+    for (let i = 0; i < 32; i += 2) knockout.push({ home_id: qualifiers[i], away_id: qualifiers[i + 1] });
+    const teams = new Map<number, TeamRow>(qualifiers.map((id) => [id, { actual_stage: null, eliminated: false }]));
+    const appkit = fakeAppkit(teams, knockout);
+
+    vi.stubGlobal('fetch', async (url: string | URL) => {
+      return scoreboard(String(url).includes('dates=20260629') ? [r32Game] : []);
+    });
+
+    // June 30: the loss is inside the rolling window and gets recorded.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-30T12:00:00Z'));
+    expect((await syncResults(appkit)).ok).toBe(true);
+    expect(teams.get(GER)).toEqual({ actual_stage: 1, eliminated: true });
+    expect(teams.get(PAR)).toEqual({ actual_stage: 2, eliminated: false });
+
+    // July 3: the June 29 game is no longer fetched; the qualifier step must
+    // leave the recorded elimination alone.
+    vi.setSystemTime(new Date('2026-07-03T12:00:00Z'));
+    expect((await syncResults(appkit)).ok).toBe(true);
+    expect(teams.get(GER)).toEqual({ actual_stage: 1, eliminated: true });
+    expect(teams.get(PAR)).toEqual({ actual_stage: 2, eliminated: false });
   });
 });

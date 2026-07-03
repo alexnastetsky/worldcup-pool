@@ -391,11 +391,14 @@ export async function syncResults(appkit: AppKitLakebase, opts: { allDates?: boo
     }
     if (qualifierIds.size === 32) {
       const ids = [...qualifierIds];
-      // Qualifiers reached R32 and are alive there; knockout progression (d)
-      // re-marks any that have since lost. Everyone else went out in groups.
+      // Qualifiers reached R32 and start alive there. Only promote rows still
+      // below stage 1: once a team is in the knockouts its eliminated flag is
+      // owned by knockout progression (d), and clearing it here would
+      // resurrect a loser whose game has left the rolling fetch window — (d)
+      // can only re-mark losers it can currently see.
       await appkit.lakebase.query(
-        `UPDATE pool.teams SET actual_stage = GREATEST(COALESCE(actual_stage, 0), 1), eliminated = FALSE
-         WHERE id = ANY($1) AND stage_manual = FALSE`,
+        `UPDATE pool.teams SET actual_stage = 1, eliminated = FALSE
+         WHERE id = ANY($1) AND stage_manual = FALSE AND COALESCE(actual_stage, 0) < 1`,
         [ids]
       );
       await appkit.lakebase.query(
