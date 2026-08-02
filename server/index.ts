@@ -5,8 +5,6 @@ import express, { Application, Request, Response } from 'express';
 import { SEED_TEAMS, SEED_MATCHES } from './seed-data';
 import { syncResults, easternDate } from './results-sync';
 
-const SYNC_INTERVAL_MS = 5 * 60 * 1000;
-
 // The current US Eastern calendar date — the whole pool keys date boundaries
 // (matchday, daily standings snapshots) off Eastern time rather than UTC.
 const EASTERN_TODAY_SQL = "(NOW() AT TIME ZONE 'America/New_York')::date";
@@ -341,10 +339,13 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase, { distPath }: 
     console.warn('[pool] Routes will be registered but may return errors');
   }
 
-  // Auto-pull results from ESPN: a full sweep at startup, then a rolling
-  // window every 5 minutes. Errors are swallowed (recorded in sync_state).
-  // After each sync, while locked, refresh today's standings snapshot so the
-  // rank-movement arrows have a day-over-day baseline.
+  // Pull results from ESPN. This used to run a full sweep at startup and a
+  // rolling window every 5 minutes; the 2026 tournament ended on July 19, so
+  // there is nothing left to pull and the automatic syncing was retired in
+  // August 2026. Admin → Sync now is the only caller left. Errors are
+  // swallowed (recorded in sync_state). While locked, each sync also refreshes
+  // today's standings snapshot so the rank-movement arrows keep a day-over-day
+  // baseline.
   const runSync = async (allDates: boolean) => {
     try {
       const s = await syncResults(appkit, { allDates });
@@ -364,12 +365,12 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase, { distPath }: 
           [currentRoundNow()]
         );
       }
+      return s;
     } catch (e) {
       console.warn('[pool] results sync failed:', (e as Error).message);
+      throw e;
     }
   };
-  void runSync(true);
-  setInterval(() => void runSync(false), SYNC_INTERVAL_MS);
 
   async function getLocked(): Promise<boolean> {
     const { rows } = await appkit.lakebase.query('SELECT locked FROM pool.app_state WHERE id = 1');
@@ -673,7 +674,9 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase, { distPath }: 
 
     app.post('/worldcup/api/admin/sync', adminOnly, async (_req, res) => {
       try {
-        const summary = await syncResults(appkit, { allDates: true });
+        // runSync rather than syncResults directly, so the manual button also
+        // refreshes the standings snapshot the way the retired timer did.
+        const summary = await runSync(true);
         res.json(summary);
       } catch (err) {
         handleError(res, 'Failed to sync results', err);
