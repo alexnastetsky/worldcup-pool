@@ -181,6 +181,17 @@ const SETUP_SQL = `
     locked BOOLEAN NOT NULL DEFAULT FALSE,
     locked_at TIMESTAMPTZ
   );
+
+  -- Written once per boot, as the last step of schema setup. A stale row means
+  -- this module could not reach its schema — which is invisible otherwise,
+  -- because the app still serves HTTP and starts "successfully". Each module
+  -- writes into its OWN schema on purpose: grants are per-schema, so one
+  -- combined heartbeat could go green while the other schema was unreachable.
+  CREATE TABLE IF NOT EXISTS pool.app_heartbeat (
+    id INT PRIMARY KEY CHECK (id = 1),
+    beat_at TIMESTAMPTZ NOT NULL,
+    service_principal TEXT
+  );
 `;
 
 const PutPredictionsBody = z.object({
@@ -334,6 +345,15 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase, { distPath }: 
       }
       console.log('[pool] Seeded 48 teams and 72 group-stage matches');
     }
+
+    // Last step, so a fresh row proves the whole setup path reached Postgres.
+    // npm run verify:deploy fails the deploy if this stays stale.
+    await appkit.lakebase.query(
+      `INSERT INTO pool.app_heartbeat (id, beat_at, service_principal) VALUES (1, NOW(), $1)
+       ON CONFLICT (id) DO UPDATE SET beat_at = NOW(), service_principal = EXCLUDED.service_principal`,
+      [process.env.DATABRICKS_CLIENT_ID ?? null]
+    );
+    console.log('[pool] heartbeat written');
   } catch (err) {
     console.warn('[pool] Database setup failed:', (err as Error).message);
     console.warn('[pool] Routes will be registered but may return errors');
