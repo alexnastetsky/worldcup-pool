@@ -1,8 +1,16 @@
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, Skeleton } from '@databricks/appkit-ui/react';
 import type { Fixtures, Me, Pick, StandingRow, Team } from '../lib/pool';
 import { STAGE_SHORT, fetchJson } from '../lib/pool';
 import { playerBreakdown } from '../lib/scoring';
+import {
+  bracketProgress,
+  buildBracket,
+  computeGroupStandings,
+  computeQualifiers,
+  winnersFromStages,
+} from '../lib/bracket';
+import { BracketCard } from './BracketCard';
 
 interface AllPicksPayload {
   participants: { email: string; display_name: string }[];
@@ -201,6 +209,19 @@ function Breakdown({ email, fixtures, allPicks }: { email: string; fixtures: Fix
   const teamById = new Map<number, Team>(fixtures.teams.map((t) => [t.id, t]));
   const hits = b.matchRows.filter((r) => r.points > 0);
 
+  // The player's full predicted bracket, rebuilt from their stored picks the
+  // same way PicksPage restores a saved bracket: group picks seed the
+  // qualifiers, per-team predicted stages decide each node's winner.
+  const nodes = useMemo(() => {
+    const picks: Record<number, Pick> = {};
+    for (const p of allPicks.matchPicks) if (p.email === email) picks[p.match_id] = p.pick;
+    const stages: Record<number, number> = {};
+    for (const p of allPicks.bracketPicks) if (p.email === email) stages[p.team_id] = p.predicted_stage;
+    const qualifiers = computeQualifiers(computeGroupStandings(picks, fixtures));
+    if (!qualifiers) return null;
+    return buildBracket(qualifiers, winnersFromStages(qualifiers, stages));
+  }, [email, fixtures, allPicks]);
+
   return (
     <div className="space-y-3 text-sm font-normal">
       <div>
@@ -269,6 +290,16 @@ function Breakdown({ email, fixtures, allPicks }: { email: string; fixtures: Fix
           ))}
         </div>
       </div>
+      <BracketCard
+        nodes={nodes}
+        teamById={teamById}
+        locked
+        decided={nodes ? bracketProgress(nodes).decided : 0}
+        onPickWinner={() => undefined}
+        title="Predicted Bracket"
+        description="How this player called the knockouts, rebuilt from their picks."
+        emptyText="No complete bracket submitted."
+      />
     </div>
   );
 }

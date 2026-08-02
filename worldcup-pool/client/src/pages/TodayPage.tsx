@@ -61,6 +61,7 @@ export function TodayPage({ me }: { me: Me }) {
   const [fixtures, setFixtures] = useState<Fixtures | null>(null);
   const [allPicks, setAllPicks] = useState<AllPicksPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showRemaining, setShowRemaining] = useState(false);
   const todayRef = useRef<HTMLDivElement | null>(null);
   const scrolledRef = useRef(false);
 
@@ -109,6 +110,22 @@ export function TodayPage({ me }: { me: Me }) {
     ]);
     if (focus) sections = [{ label: null, date: focus, matches: matchesOn(focus), knockout: knockoutOn(focus) }];
   }
+
+  // Everything after the Yesterday/Today/Tomorrow window, revealable on demand.
+  const lastShown = sections.length > 0 ? sections[sections.length - 1].date : shiftDate(today, 1);
+  const remainingDates = [
+    ...new Set(
+      [...fixtures.matches.map((m) => m.match_date), ...fixtures.knockout.map((k) => k.match_date)].filter(
+        (d) => d > lastShown
+      )
+    ),
+  ].sort();
+  const remainingSections: DaySection[] = remainingDates.map((date) => ({
+    label: null,
+    date,
+    matches: matchesOn(date),
+    knockout: knockoutOn(date),
+  }));
 
   const pickMap = new Map<string, Pick>();
   allPicks?.matchPicks.forEach((p) => pickMap.set(`${p.email}|${p.match_id}`, p.pick));
@@ -282,6 +299,26 @@ export function TodayPage({ me }: { me: Me }) {
     );
   };
 
+  const renderSection = (s: DaySection) => {
+    const isToday = s.label === 'Today';
+    return (
+      <div key={s.date} ref={isToday ? todayRef : undefined} className="scroll-mt-4">
+        <Card className={isToday ? 'border-primary border-2 shadow-md' : ''}>
+          <CardHeader>
+            <CardTitle className={isToday ? '' : 'text-base text-muted-foreground'}>
+              {s.label ? `${s.label} · ` : ''}
+              {formatLongDate(s.date)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {s.matches.map(renderRow)}
+            {s.knockout.map(renderKnockoutRow)}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
+
   return (
     <div className="max-w-2xl mx-auto space-y-4">
       <div className="flex justify-end">
@@ -303,25 +340,24 @@ export function TodayPage({ me }: { me: Me }) {
         </Card>
       )}
 
-      {sections.map((s) => {
-        const isToday = s.label === 'Today';
-        return (
-          <div key={s.date} ref={isToday ? todayRef : undefined} className="scroll-mt-4">
-            <Card className={isToday ? 'border-primary border-2 shadow-md' : ''}>
-              <CardHeader>
-                <CardTitle className={isToday ? '' : 'text-base text-muted-foreground'}>
-                  {s.label ? `${s.label} · ` : ''}
-                  {formatLongDate(s.date)}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {s.matches.map(renderRow)}
-                {s.knockout.map(renderKnockoutRow)}
-              </CardContent>
-            </Card>
+      {sections.map(renderSection)}
+
+      {remainingSections.length > 0 && (
+        <>
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={() => setShowRemaining((v) => !v)}
+              className="px-2.5 py-1 rounded-full border text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              {showRemaining
+                ? 'Hide the rest of the schedule'
+                : `Show the rest of the schedule (${remainingSections.length} match day${remainingSections.length === 1 ? '' : 's'})`}
+            </button>
           </div>
-        );
-      })}
+          {showRemaining && remainingSections.map(renderSection)}
+        </>
+      )}
     </div>
   );
 }
