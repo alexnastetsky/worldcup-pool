@@ -346,6 +346,26 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase, { distPath }: 
       console.log('[pool] Seeded 48 teams and 72 group-stage matches');
     }
 
+    // Anything we created ourselves is owned by this app's service principal,
+    // which nobody else can ALTER — and a recreated app would strand it. Hand
+    // it to the shared app_owner role we belong to. Best-effort: the role may
+    // not exist yet on a fresh database (see scripts/grant-app-role.mjs).
+    await appkit.lakebase.query(`DO $$
+      DECLARE r record;
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_owner') THEN
+          FOR r IN
+            SELECT c.relkind, c.relname FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname = 'pool' AND c.relkind IN ('r','S')
+               AND pg_get_userbyid(c.relowner) = CURRENT_USER
+          LOOP
+            EXECUTE format('ALTER %s pool.%I OWNER TO app_owner',
+                           CASE WHEN r.relkind = 'S' THEN 'SEQUENCE' ELSE 'TABLE' END, r.relname);
+          END LOOP;
+        END IF;
+      END $$;`);
+
     // Last step, so a fresh row proves the whole setup path reached Postgres.
     // npm run verify:deploy fails the deploy if this stays stale.
     await appkit.lakebase.query(
