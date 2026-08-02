@@ -89,7 +89,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
 
   const refreshMe = useCallback(() => {
-    fetchJson<Me>('/api/me')
+    fetchJson<Me>('/worldcup/api/me')
       .then(setMe)
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load user'));
   }, []);
@@ -112,19 +112,22 @@ export default function App() {
     );
   }
 
-  const router = createBrowserRouter([
-    {
-      element: <Layout me={me} refreshMe={refreshMe} />,
-      children: [
-        { path: '/', element: <TodayPage me={me} /> },
-        { path: '/my-picks', element: <PicksPage me={me} /> },
-        { path: '/standings', element: <StandingsPage me={me} /> },
-        { path: '/picks', element: <AllPicksPage me={me} /> },
-        { path: '/rules', element: <RulesPage /> },
-        { path: '/admin', element: <AdminPage me={me} onStateChange={refreshMe} /> },
-      ],
-    },
-  ]);
+  const router = createBrowserRouter(
+    [
+      {
+        element: <Layout me={me} refreshMe={refreshMe} />,
+        children: [
+          { path: '/', element: <TodayPage me={me} /> },
+          { path: '/my-picks', element: <PicksPage me={me} /> },
+          { path: '/standings', element: <StandingsPage me={me} /> },
+          { path: '/picks', element: <AllPicksPage me={me} /> },
+          { path: '/rules', element: <RulesPage /> },
+          { path: '/admin', element: <AdminPage me={me} onStateChange={refreshMe} /> },
+        ],
+      },
+    ],
+    { basename: '/worldcup' }
+  );
 
   return <RouterProvider router={router} />;
 }

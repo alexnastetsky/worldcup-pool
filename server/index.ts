@@ -1,7 +1,9 @@
+import path from 'node:path';
+import fs from 'node:fs';
 import { z } from 'zod';
-import { Application, Request, Response } from 'express';
-import { SEED_TEAMS, SEED_MATCHES } from '../seed-data';
-import { syncResults, easternDate } from '../results-sync';
+import express, { Application, Request, Response } from 'express';
+import { SEED_TEAMS, SEED_MATCHES } from './seed-data';
+import { syncResults, easternDate } from './results-sync';
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -217,7 +219,36 @@ function handleError(res: Response, context: string, err: unknown) {
   res.status(500).json({ error: context });
 }
 
-export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
+// The pool SPA is served by us, not by AppKit's StaticServer, so it never gets
+// the injected runtime config. appkit-ui degrades gracefully without it, but we
+// inject an equivalent empty config for parity so nothing warns.
+const CONFIG_SCRIPT =
+  `<script id="__appkit__" type="application/json">` +
+  `{"appName":"worldcup","queries":{},"endpoints":{},"plugins":{}}</script>` +
+  `<script>window.__appkit__=JSON.parse(document.getElementById('__appkit__').textContent);</script>`;
+
+export interface PoolOptions {
+  // Absolute path to the built client. The shell app owns the directory layout,
+  // so it passes this in rather than us guessing from cwd.
+  distPath: string;
+}
+
+function servePoolIndex(res: Response, distPath: string) {
+  const indexPath = path.join(distPath, 'index.html');
+  if (!fs.existsSync(indexPath)) {
+    // Fail loudly rather than falling through to the shell's catch-all, which
+    // would serve the landing page for /worldcup routes.
+    res
+      .status(503)
+      .type('text/plain')
+      .send(`World cup client build is missing (${distPath}). Run: npm run build:worldcup`);
+    return;
+  }
+  const html = fs.readFileSync(indexPath, 'utf-8').replace('<body>', `<body>${CONFIG_SCRIPT}`);
+  res.type('html').send(html);
+}
+
+export async function setupPoolRoutes(appkit: AppKitWithLakebase, { distPath }: PoolOptions) {
   try {
     await appkit.lakebase.query(SETUP_SQL);
     await appkit.lakebase.query(
@@ -345,10 +376,13 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
     return rows.length > 0 && rows[0].locked === true;
   }
 
+  // Registered via server.extend, which AppKit runs BEFORE its static
+  // catch-all — so everything under /worldcup takes precedence over the
+  // shell's landing page without touching it.
   appkit.server.extend((app) => {
     // Resolve identity once per request; reject unauthenticated calls.
-    app.use('/api', (req, res, next) => {
-      // Every /api response is live, per-request data (fixtures, picks, standings).
+    app.use('/worldcup/api', (req, res, next) => {
+      // Every /worldcup/api response is live, per-request data (fixtures, picks, standings).
       // Forbid browser/edge caching so two users never see different snapshots —
       // e.g. one seeing a team as still alive after it has been eliminated.
       res.set('Cache-Control', 'no-store');
@@ -369,7 +403,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
       next();
     };
 
-    app.get('/api/me', async (_req, res) => {
+    app.get('/worldcup/api/me', async (_req, res) => {
       try {
         const email = res.locals.email as string;
         const locked = await getLocked();
@@ -387,7 +421,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
       }
     });
 
-    app.get('/api/fixtures', async (_req, res) => {
+    app.get('/worldcup/api/fixtures', async (_req, res) => {
       try {
         const teams = await appkit.lakebase.query(
           'SELECT id, name, group_letter, actual_stage, eliminated FROM pool.teams ORDER BY group_letter, id'
@@ -412,7 +446,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
 
     // Who's in: names and completeness only — never the picks themselves,
     // so it is safe to expose before submissions are locked.
-    app.get('/api/participants/status', async (_req, res) => {
+    app.get('/worldcup/api/participants/status', async (_req, res) => {
       try {
         const { rows } = await appkit.lakebase.query(`
           SELECT p.email, p.display_name, p.updated_at,
@@ -427,7 +461,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
       }
     });
 
-    app.get('/api/predictions/mine', async (_req, res) => {
+    app.get('/worldcup/api/predictions/mine', async (_req, res) => {
       try {
         const email = res.locals.email as string;
         const matchPicks = await appkit.lakebase.query(
@@ -444,7 +478,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
       }
     });
 
-    app.put('/api/predictions/mine', async (req, res) => {
+    app.put('/worldcup/api/predictions/mine', async (req, res) => {
       try {
         if (await getLocked()) {
           res.status(403).json({ error: 'Submissions are locked' });
@@ -484,7 +518,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
       }
     });
 
-    app.get('/api/predictions/all', async (_req, res) => {
+    app.get('/worldcup/api/predictions/all', async (_req, res) => {
       try {
         if (!(await getLocked())) {
           res.status(403).json({ error: 'Predictions are hidden until submissions are locked' });
@@ -507,7 +541,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
       }
     });
 
-    app.get('/api/standings', async (_req, res) => {
+    app.get('/worldcup/api/standings', async (_req, res) => {
       try {
         if (!(await getLocked())) {
           res.status(403).json({ error: 'Standings are hidden until submissions are locked' });
@@ -540,7 +574,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
       }
     });
 
-    app.post('/api/admin/lock', adminOnly, async (_req, res) => {
+    app.post('/worldcup/api/admin/lock', adminOnly, async (_req, res) => {
       try {
         await appkit.lakebase.query('UPDATE pool.app_state SET locked = TRUE, locked_at = NOW() WHERE id = 1');
         res.json({ ok: true, locked: true });
@@ -549,7 +583,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
       }
     });
 
-    app.post('/api/admin/unlock', adminOnly, async (_req, res) => {
+    app.post('/worldcup/api/admin/unlock', adminOnly, async (_req, res) => {
       try {
         await appkit.lakebase.query('UPDATE pool.app_state SET locked = FALSE, locked_at = NULL WHERE id = 1');
         res.json({ ok: true, locked: false });
@@ -558,7 +592,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
       }
     });
 
-    app.put('/api/admin/results/match/:id', adminOnly, async (req, res) => {
+    app.put('/worldcup/api/admin/results/match/:id', adminOnly, async (req, res) => {
       try {
         const id = parseInt(String(req.params.id), 10);
         const parsed = PutMatchResultBody.safeParse(req.body);
@@ -580,7 +614,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
       }
     });
 
-    app.put('/api/admin/results/team/:id', adminOnly, async (req, res) => {
+    app.put('/worldcup/api/admin/results/team/:id', adminOnly, async (req, res) => {
       try {
         const id = parseInt(String(req.params.id), 10);
         const parsed = PutTeamStageBody.safeParse(req.body);
@@ -608,7 +642,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
 
     // Full reset for dry runs: wipes predictions, participants, and results,
     // unlocks submissions. Seeded fixtures/teams are kept.
-    app.post('/api/admin/reset', adminOnly, async (_req, res) => {
+    app.post('/worldcup/api/admin/reset', adminOnly, async (_req, res) => {
       try {
         await appkit.lakebase.query('DELETE FROM pool.match_predictions');
         await appkit.lakebase.query('DELETE FROM pool.bracket_predictions');
@@ -628,7 +662,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
     });
 
     // Auto-sync status (any signed-in user) and a manual "Sync now" (admin).
-    app.get('/api/sync-status', async (_req, res) => {
+    app.get('/worldcup/api/sync-status', async (_req, res) => {
       try {
         const { rows } = await appkit.lakebase.query('SELECT last_synced_at, status FROM pool.sync_state WHERE id = 1');
         res.json(rows[0] ?? { last_synced_at: null, status: null });
@@ -637,7 +671,7 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
       }
     });
 
-    app.post('/api/admin/sync', adminOnly, async (_req, res) => {
+    app.post('/worldcup/api/admin/sync', adminOnly, async (_req, res) => {
       try {
         const summary = await syncResults(appkit, { allDates: true });
         res.json(summary);
@@ -645,5 +679,10 @@ export async function setupPoolRoutes(appkit: AppKitWithLakebase) {
         handleError(res, 'Failed to sync results', err);
       }
     });
+
+    // Static assets (built with base '/worldcup/') and the SPA fallback for
+    // deep links like /worldcup/standings on hard refresh.
+    app.use('/worldcup', express.static(distPath, { index: false }));
+    app.get(['/worldcup', '/worldcup/*'], (_req, res) => servePoolIndex(res, distPath));
   });
 }

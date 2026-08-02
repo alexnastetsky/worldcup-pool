@@ -28,9 +28,9 @@ export function StandingsPage({ me }: { me: Me }) {
   useEffect(() => {
     if (!me.locked) return;
     Promise.all([
-      fetchJson<StandingRow[]>('/api/standings'),
-      fetchJson<Fixtures>('/api/fixtures'),
-      fetchJson<AllPicksPayload>('/api/predictions/all'),
+      fetchJson<StandingRow[]>('/worldcup/api/standings'),
+      fetchJson<Fixtures>('/worldcup/api/fixtures'),
+      fetchJson<AllPicksPayload>('/worldcup/api/predictions/all'),
     ])
       .then(([standings, fx, all]) => {
         setRows(standings);

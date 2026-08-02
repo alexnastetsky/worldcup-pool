@@ -20,7 +20,7 @@ export function AllPicksPage({ me }: { me: Me }) {
 
   useEffect(() => {
     if (!me.locked) return;
-    Promise.all([fetchJson<Fixtures>('/api/fixtures'), fetchJson<AllPicksPayload>('/api/predictions/all')])
+    Promise.all([fetchJson<Fixtures>('/worldcup/api/fixtures'), fetchJson<AllPicksPayload>('/worldcup/api/predictions/all')])
       .then(([fx, all]) => {
         setFixtures(fx);
         setData(all);

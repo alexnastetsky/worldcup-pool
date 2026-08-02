@@ -3,12 +3,17 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'node:path';
 
-// https://vite.dev/config/
+// Mounted under /worldcup by the server extension in server/index.ts. The base
+// keeps its asset URLs (/worldcup/assets/*) clear of the other apps served by
+// the same shell.
 export default defineConfig({
   root: __dirname,
+  base: '/worldcup/',
   plugins: [react(), tailwindcss()],
   server: {
-    middlewareMode: true,
+    proxy: {
+      '/worldcup/api': 'http://localhost:8000',
+    },
   },
   build: {
     outDir: path.resolve(__dirname, './dist'),

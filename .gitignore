@@ -1,11 +1,7 @@
-# Dependencies
+.DS_Store
 node_modules/
-
-# Databricks bundle state (terraform state, sync snapshots, provider binaries)
-.databricks/
+dist/
+.env
 
 # Local Claude Code settings (personal permissions)
 .claude/settings.local.json
-
-# macOS
-.DS_Store

@@ -64,13 +64,13 @@ export function PicksPage({ me }: { me: Me }) {
   const saveSeqRef = useRef(0);
 
   const loadParticipants = () => {
-    fetchJson<ParticipantStatus[]>('/api/participants/status')
+    fetchJson<ParticipantStatus[]>('/worldcup/api/participants/status')
       .then(setParticipants)
       .catch(() => undefined); // non-critical
   };
 
   useEffect(() => {
-    Promise.all([fetchJson<Fixtures>('/api/fixtures'), fetchJson<MinePayload>('/api/predictions/mine')])
+    Promise.all([fetchJson<Fixtures>('/worldcup/api/fixtures'), fetchJson<MinePayload>('/worldcup/api/predictions/mine')])
       .then(([fx, mine]) => {
         const loadedPicks = Object.fromEntries(mine.matchPicks.map((p) => [p.match_id, p.pick]));
         const savedStages = Object.fromEntries(mine.bracketPicks.map((p) => [p.team_id, p.predicted_stage]));
@@ -101,7 +101,7 @@ export function PicksPage({ me }: { me: Me }) {
       setSaveState('saving');
       saveChainRef.current = saveChainRef.current.then(async () => {
         try {
-          await sendJson('/api/predictions/mine', 'PUT', {
+          await sendJson('/worldcup/api/predictions/mine', 'PUT', {
             displayName: nameRef.current.trim(),
             matchPicks: Object.fromEntries(Object.entries(picksRef.current).map(([k, v]) => [String(k), v])),
             bracketPicks: Object.fromEntries(Object.entries(stagesRef.current).map(([k, v]) => [String(k), v])),

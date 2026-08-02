@@ -17,13 +17,13 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
   const [sync, setSync] = useState<SyncStatus | null>(null);
 
   const loadFixtures = () => {
-    fetchJson<Fixtures>('/api/fixtures')
+    fetchJson<Fixtures>('/worldcup/api/fixtures')
       .then(setFixtures)
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load fixtures'));
   };
 
   const loadSync = () => {
-    fetchJson<SyncStatus>('/api/sync-status')
+    fetchJson<SyncStatus>('/worldcup/api/sync-status')
       .then(setSync)
       .catch(() => undefined);
   };
@@ -55,28 +55,28 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
 
   const setLocked = (locked: boolean) => {
     run(async () => {
-      await sendJson(`/api/admin/${locked ? 'lock' : 'unlock'}`, 'POST');
+      await sendJson(`/worldcup/api/admin/${locked ? 'lock' : 'unlock'}`, 'POST');
       onStateChange();
     });
   };
 
   const setMatchResult = (matchId: number, result: Pick | null) => {
     run(async () => {
-      await sendJson(`/api/admin/results/match/${matchId}`, 'PUT', { result });
+      await sendJson(`/worldcup/api/admin/results/match/${matchId}`, 'PUT', { result });
       loadFixtures();
     });
   };
 
   const setTeamStage = (teamId: number, stage: number | null, eliminated: boolean) => {
     run(async () => {
-      await sendJson(`/api/admin/results/team/${teamId}`, 'PUT', { stage, eliminated });
+      await sendJson(`/worldcup/api/admin/results/team/${teamId}`, 'PUT', { stage, eliminated });
       loadFixtures();
     });
   };
 
   const resetPool = () => {
     run(async () => {
-      await sendJson('/api/admin/reset', 'POST');
+      await sendJson('/worldcup/api/admin/reset', 'POST');
       setResetText('');
       onStateChange();
       loadFixtures();
@@ -85,7 +85,7 @@ export function AdminPage({ me, onStateChange }: { me: Me; onStateChange: () => 
 
   const syncNow = () => {
     run(async () => {
-      await sendJson('/api/admin/sync', 'POST');
+      await sendJson('/worldcup/api/admin/sync', 'POST');
       loadSync();
       loadFixtures();
     });

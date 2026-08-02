@@ -10,7 +10,7 @@ predictions, identified by their login email.
    - UI: workspace **Settings → Identity and access → Users → Add user**, enter their email.
    - CLI: `databricks users create --user-name friend@example.com --profile DEFAULT`
 2. **They accept the invite** — they'll get an email from Databricks and set up their login.
-3. **Send them the app URL**: https://worldcup-pool-2371699704326236.aws.databricksapps.com
+3. **Send them the app URL**: https://home-2371699704326236.aws.databricksapps.com/worldcup
 
 That's it for access: the app has `CAN_USE` granted to the workspace `users` group, and
 every invited user lands in that group automatically.

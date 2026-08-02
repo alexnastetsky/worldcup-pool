@@ -68,8 +68,8 @@ export function TodayPage({ me }: { me: Me }) {
   useEffect(() => {
     // Picks are only visible once locked; before that just show the fixtures.
     Promise.all([
-      fetchJson<Fixtures>('/api/fixtures'),
-      me.locked ? fetchJson<AllPicksPayload>('/api/predictions/all') : Promise.resolve(null),
+      fetchJson<Fixtures>('/worldcup/api/fixtures'),
+      me.locked ? fetchJson<AllPicksPayload>('/worldcup/api/predictions/all') : Promise.resolve(null),
     ])
       .then(([fx, all]) => {
         setFixtures(fx);
